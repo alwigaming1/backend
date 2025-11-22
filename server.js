@@ -6,6 +6,9 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
+// --- WHATSAPP IMPORTS (BARU) ---
+const { Client, LocalAuth } = require('whatsapp-web.js'); 
+const qrcode = require('qrcode-terminal');             
 
 // Muat variabel lingkungan dari file .env (penting untuk development lokal)
 dotenv.config();
@@ -38,13 +41,11 @@ app.use(express.json());
 // 3. MONGODB CONNECTION
 // ------------------------------------------
 if (!MONGO_URI) {
-    console.error('❌ FATAL ERROR: MONGO_URI tidak ditemukan! Pastikan Anda menyetelnya di Environment Variables Railway.');
-    // throw new Error('MONGO_URI is not defined'); // Opsional: Hentikan proses jika gagal
-} else {
-    mongoose.connect(MONGO_URI)
-        .then(() => console.log('✅ MongoDB Connected!'))
-        .catch(err => console.error('❌ MongoDB Connection Error:', err));
+    console.error('❌ FATAL: Variabel MONGO_URI tidak ditemukan. Cek .env atau Railway Variables.');
 }
+mongoose.connect(MONGO_URI)
+    .then(() => console.log('✅ MongoDB Connected!'))
+    .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // --- MONGODB SCHEMA (Contoh Sederhana) ---
 const JobSchema = new mongoose.Schema({
@@ -52,85 +53,144 @@ const JobSchema = new mongoose.Schema({
     courierId: String,
     status: String, // new, on_delivery, completed, cancelled
     payment: Number,
-    pickup: { name: String, address: String },
-    delivery: { name: String, address: String },
-    distance: Number,
+    pickup: { name: String, address: String, lat: Number, lng: Number },
+    delivery: { name: String, address: String, lat: Number, lng: Number },
+    // Tambahkan field lain sesuai kebutuhan
     createdAt: { type: Date, default: Date.now },
-    startedAt: Date,
-    completedAt: Date
+    completedAt: Date,
+    customerPhone: String // BARU: Nomor HP Customer
 });
+
 const Job = mongoose.model('Job', JobSchema);
 
-// --- WHATSAPP SIMULATION STATE ---
-let whatsappStatus = 'disconnected';
-let qrCodeData = null; // Simpan data QR code di sini
+// --- WHATSAPP LOGIC (KUNCI UTAMA) ---
 
-// --- BACKEND STATE FOR COURIERS AND JOBS ---
-let backendState = {
-    couriers: {}, // { 'courier_001': { online: true } }
-    jobs: [] // Daftar jobs yang belum diambil
-};
+let whatsappStatus = 'disconnected';
+let qrCodeData = null; // Menyimpan data QR
+
+// Inisialisasi Klien WhatsApp
+const client = new Client({
+    // LocalAuth menyimpan sesi di folder .wwebjs_auth
+    authStrategy: new LocalAuth({ clientId: 'courier_app' }),
+    puppeteer: {
+        // Opsi ini PENTING untuk deployment di platform seperti Railway/Vercel
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    }
+});
+
+client.on('qr', (qr) => {
+    // Tampilkan di konsol (opsional)
+    qrcode.generate(qr, { small: true }); 
+    
+    // Simpan data QR dan update status
+    qrCodeData = qr; 
+    whatsappStatus = 'qr_received';
+    console.log('⏳ QR Code Diterima. Update status ke frontend.');
+    
+    // Kirim QR ke semua klien Socket.IO (frontend kurir)
+    io.emit('whatsapp_status', { status: whatsappStatus, qr: qrCodeData });
+});
+
+client.on('ready', () => {
+    whatsappStatus = 'connected';
+    qrCodeData = null; // Bersihkan QR setelah terhubung
+    io.emit('whatsapp_status', { status: whatsappStatus, qr: null });
+    console.log('✅ WhatsApp Berhasil Terhubung!');
+});
+
+client.on('disconnected', (reason) => {
+    whatsappStatus = 'disconnected';
+    qrCodeData = null;
+    io.emit('whatsapp_status', { status: whatsappStatus, qr: null });
+    console.log('❌ WhatsApp Terputus:', reason);
+    // Coba inisialisasi ulang setelah jeda
+    setTimeout(() => client.initialize(), 10000);
+});
+
+client.on('message', async (msg) => {
+    // Logika untuk menangani pesan masuk dari Customer
+    if (msg.fromMe) return; // Abaikan pesan dari diri sendiri
+    
+    // Asumsi: Customer mengirim pesan ke nomor kurir yang terhubung
+    // Cari job yang sedang aktif/berlangsung dengan nomor customer tersebut
+    // (Dalam kasus nyata, Anda perlu logika yang lebih kompleks untuk mengidentifikasi Job ID dari nomor WA)
+    
+    // Contoh sederhana: Notifikasi pesan masuk
+    // Nomor WA yang masuk dalam format '628xxx@c.us'
+    const customerNumber = msg.from.replace('@c.us', ''); 
+    
+    // Kirim notifikasi pesan ke semua kurir yang terhubung
+    io.emit('new_message', {
+        jobId: 'Unknown', // Perlu logika pencarian Job
+        sender: customerNumber,
+        message: msg.body
+    });
+    console.log(`💬 Pesan masuk dari ${customerNumber}: ${msg.body}`);
+});
+
+// Mulai Klien WhatsApp 
+client.initialize().catch(err => console.error('Gagal inisialisasi WA:', err));
+
 
 // --- SOCKET.IO LOGIC ---
+
+// State Simulasi (sebelum pindah ke MongoDB)
+const backendState = {
+    jobs: [], // Daftar pesanan baru
+    couriers: {} // Status online kurir
+};
+
+// Fungsi simulasi untuk membuat job baru (hanya untuk pengujian)
+function createSimulatedJob() {
+    // ... (Fungsi simulasi job, dihilangkan untuk fokus pada WA)
+    // ...
+}
+
 io.on('connection', (socket) => {
-    const courierId = socket.handshake.query.courierId;
-    
-    if (courierId) {
-        backendState.couriers[courierId] = { online: true };
-        console.log(`Kurir ${courierId} terhubung.`);
-    }
+    console.log('🔗 Kurir Baru Terhubung via Socket.IO:', socket.id);
 
-    // [EVENT] Kurir meminta data jobs yang belum diambil
-    socket.on('request_jobs', async () => {
-        try {
-            const jobs = await Job.find({ status: 'new' });
-            socket.emit('available_jobs', jobs);
-        } catch (error) {
-            console.error('Error fetching jobs:', error);
+    let courierId = socket.handshake.query.courierId || 'courier_001';
+    
+    // Kirim status WhatsApp saat kurir terhubung
+    socket.emit('whatsapp_status', { status: whatsappStatus, qr: qrCodeData });
+
+    // Handle permintaan pengiriman pesan dari kurir
+    socket.on('send_message', async (data) => {
+        // data: { jobId: '...', message: '...' }
+        console.log(`Permintaan pesan untuk Job ${data.jobId}: ${data.message}`);
+
+        // 1. Cari detail Job untuk mendapatkan nomor Customer
+        const job = await Job.findOne({ id: data.jobId });
+        
+        if (!job || !job.customerPhone) {
+            socket.emit('message_sent', { jobId: data.jobId, success: false, error: 'Nomor customer tidak ditemukan.' });
+            return console.error(`Job/Customer Phone tidak ditemukan untuk Job ID: ${data.jobId}`);
+        }
+        
+        // Format nomor WA yang benar (misal: '62812xxxx@c.us')
+        const customerNumber = `${job.customerPhone}@c.us`; 
+        
+        if (whatsappStatus === 'connected') {
+            try {
+                // KIRIM PESAN WHATSAPP NYATA
+                await client.sendMessage(customerNumber, data.message);
+                console.log(`Pesan WA ke ${customerNumber} terkirim.`);
+                // Kirim balik notifikasi sukses ke kurir
+                socket.emit('message_sent', { jobId: data.jobId, success: true });
+            } catch (error) {
+                console.error('Gagal kirim pesan WA:', error.message);
+                socket.emit('message_sent', { jobId: data.jobId, success: false, error: 'Gagal mengirim pesan WhatsApp. Cek log server.' });
+            }
+        } else {
+            console.log('WhatsApp TIDAK TERHUBUNG. Pesan gagal dikirim.');
+            socket.emit('message_sent', { jobId: data.jobId, success: false, error: 'WhatsApp belum terhubung/discan.' });
         }
     });
 
-    // [EVENT] Kurir menerima pekerjaan
-    socket.on('accept_job', async (data) => {
-        const job = await Job.findOneAndUpdate(
-            { id: data.jobId, status: 'new' },
-            { $set: { status: 'on_delivery', courierId: courierId, startedAt: new Date() } },
-            { new: true }
-        );
-        if (job) {
-            socket.emit('job_accepted', job);
-            console.log(`Pekerjaan ${data.jobId} diterima oleh ${courierId}`);
-            // Kirim notifikasi ke semua kurir (jika ada) bahwa job ini hilang
-            io.emit('job_removed', { jobId: data.jobId });
-        }
-    });
-
-    // [EVENT] Kurir menyelesaikan pekerjaan
-    socket.on('job_completed', async (data) => {
-        await Job.findOneAndUpdate(
-            { id: data.jobId },
-            { $set: { status: 'completed', completedAt: new Date() } }
-        );
-        console.log(`Pekerjaan ${data.jobId} diselesaikan oleh ${courierId}`);
-    });
-    
-    // [EVENT] Cek status WhatsApp (dari frontend)
-    socket.on('get_whatsapp_status', () => {
-        // Kirim status simulasi
-        socket.emit('whatsapp_status', { status: whatsappStatus, qr: qrCodeData });
-    });
-
-    // [EVENT] Kurir mengirim pesan
-    socket.on('send_message', (data) => {
-        console.log(`Pesan dari Kurir ${data.sender} untuk Job ${data.jobId}: ${data.message}`);
-        // Logika di sini untuk meneruskan pesan ke Customer via WhatsApp
-    });
+    // ... (Handler socket.io lainnya seperti job_accepted, job_completed, dll.)
 
     socket.on('disconnect', () => {
-        if (courierId && backendState.couriers[courierId]) {
-            backendState.couriers[courierId].online = false;
-            console.log(`Kurir ${courierId} terputus.`);
-        }
+        // ...
     });
 });
 
@@ -140,17 +200,7 @@ app.get('/', (req, res) => {
     res.send('Courier Backend is Running! (Socket.IO port: ' + PORT + ')');
 });
 
-// Endpoint untuk Health Check (diakses dari Vercel/luar)
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        whatsapp: whatsappStatus,
-        database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
-    });
-});
-
-
-// Start server
+// Start Server
 server.listen(PORT, () => {
-    console.log(`✅ Backend server is running on port ${PORT}`);
-}); // <--- FIX: Memastikan penutupan fungsi yang benar
+    console.log(`🚀 Server berjalan di http://localhost:${PORT}`);
+});

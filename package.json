@@ -1,3 +1,5 @@
+// package.json
+
 {
   "name": "courier-backend",
   "version": "1.0.0",
@@ -12,7 +14,9 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "mongoose": "^8.0.3",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.7.2",
+    "whatsapp-web.js": "^1.23.0",    
+    "qrcode-terminal": "^0.12.0"    
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
