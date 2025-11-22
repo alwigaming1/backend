@@ -14,15 +14,15 @@ const app = express();
 const server = http.createServer(app);
 
 // Izinkan koneksi dari frontend Vercel Anda (ganti * dengan URL Vercel Anda!)
+// Izinkan koneksi HANYA dari frontend Vercel Anda (URL yang BENAR)
 const io = new Server(server, {
     cors: {
-        origin: "*", 
+        origin: "https://pasarkilat-app.vercel.app", // <-- GANTI DARI "*" KE URL VERCEL ANDA
         methods: ["GET", "POST"]
     }
 });
 
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI;
 
 // Middleware
 app.use(cors());
