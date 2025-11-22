@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const chromium = require('chromium'); // Tambahkan ini
 
 const app = express();
 const server = http.createServer(app);
@@ -23,12 +24,12 @@ app.use(express.json());
 let whatsappStatus = 'disconnected';
 let qrCodeData = null;
 
-// === SISTEM MAPPING UNTUK PRIVACY ===
-const customerMapping = new Map(); // Map: jobId -> customerPhone
-const phoneToJobMapping = new Map(); // Map: customerPhone -> jobId
-const chatSessions = new Map(); // Map: jobId -> chat history
+// Sistem Mapping untuk Chat Aman
+const customerMapping = new Map();
+const phoneToJobMapping = new Map();
+const chatSessions = new Map();
 
-// WhatsApp Client
+// WhatsApp Client dengan Chromium
 const client = new Client({
     authStrategy: new LocalAuth({
         clientId: "courier-app",
@@ -44,11 +45,24 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--single-process',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--remote-debugging-port=9222'
         ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable'
+        executablePath: chromium.path // Gunakan chromium dari package
     }
 });
+
+// ... (rest of your existing WhatsApp event handlers and socket logic tetap sama)
+
+client.initialize().catch(err => {
+    console.error('❌ Gagal inisialisasi WhatsApp:', err);
+    whatsappStatus = 'error';
+    io.emit('whatsapp_status', { 
+        status: whatsappStatus, 
+        error: err.message 
+    });
+});
+
 
 // === WHATSAPP EVENT HANDLERS ===
 client.on('qr', (qr) => {
