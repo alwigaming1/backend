@@ -1,0 +1,4 @@
+# Railfile
+
+# Instal library dasar yang dibutuhkan oleh Puppeteer (Chromium)
+apt-get install -y libgobject-2.0-0 libnss3 libasound2 libatk1.0-0 libatk-bridge2.0-0 libgtk-3-0
