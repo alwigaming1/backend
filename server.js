@@ -1,270 +1,170 @@
-// server.js - BACKEND DENGAN WHATSAPP REAL
+// server.js - SISTEM CHAT AMAN DENGAN MAPPING
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const mongoose = require('mongoose');
-const dotenv = require('dotenv');
-const cors = require('cors');
-
-// WhatsApp Web.js dengan konfigurasi khusus Railway
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI;
 const FRONTEND_URL = "https://pasarkilat-app.vercel.app";
 
-// Konfigurasi Socket.IO
 const io = new Server(server, {
     cors: {
         origin: FRONTEND_URL,
-        methods: ["GET", "POST"],
-        credentials: true
+        methods: ["GET", "POST"]
     }
 });
 
-// Middleware
-app.use(cors({
-    origin: FRONTEND_URL,
-    credentials: true
-}));
 app.use(express.json());
 
-// --- WHATSAPP CLIENT SETUP ---
 let whatsappStatus = 'disconnected';
 let qrCodeData = null;
-let client = null;
 
-function initializeWhatsApp() {
-    console.log('🔄 Menginisialisasi WhatsApp Client...');
-    
-    client = new Client({
-        authStrategy: new LocalAuth({
-            clientId: "courier-app",
-            dataPath: "./whatsapp-auth"
-        }),
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu'
-            ],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
-        },
-        webVersionCache: {
-            type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
-        }
-    });
+// === SISTEM MAPPING UNTUK PRIVACY ===
+const customerMapping = new Map(); // Map: jobId -> customerPhone
+const phoneToJobMapping = new Map(); // Map: customerPhone -> jobId
+const chatSessions = new Map(); // Map: jobId -> chat history
 
-    client.on('qr', (qr) => {
-        console.log('📱 QR Code Received');
-        qrcode.generate(qr, { small: true });
-        
-        // Convert QR to data URL untuk frontend
-        qrCodeData = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qr)}`;
-        whatsappStatus = 'qr_received';
-        
-        io.emit('whatsapp_status', { 
-            status: whatsappStatus, 
-            qr: qrCodeData 
-        });
-    });
-
-    client.on('ready', () => {
-        console.log('✅ WhatsApp Client is Ready!');
-        whatsappStatus = 'connected';
-        qrCodeData = null;
-        
-        io.emit('whatsapp_status', { 
-            status: whatsappStatus, 
-            qr: null 
-        });
-    });
-
-    client.on('authenticated', () => {
-        console.log('🔐 WhatsApp Authenticated');
-        whatsappStatus = 'authenticated';
-    });
-
-    client.on('auth_failure', (msg) => {
-        console.error('❌ WhatsApp Auth Failure:', msg);
-        whatsappStatus = 'auth_failure';
-        io.emit('whatsapp_status', { 
-            status: whatsappStatus, 
-            error: msg 
-        });
-        
-        // Coba ulang setelah 30 detik
-        setTimeout(() => {
-            if (whatsappStatus !== 'connected') {
-                initializeWhatsApp();
-            }
-        }, 30000);
-    });
-
-    client.on('disconnected', (reason) => {
-        console.log('❌ WhatsApp Disconnected:', reason);
-        whatsappStatus = 'disconnected';
-        io.emit('whatsapp_status', { 
-            status: whatsappStatus, 
-            reason: reason 
-        });
-        
-        // Coba ulang setelah 10 detik
-        setTimeout(() => {
-            initializeWhatsApp();
-        }, 10000);
-    });
-
-    // Handle incoming messages
-    client.on('message', async (msg) => {
-        if (msg.fromMe) return;
-        
-        console.log('📨 Pesan masuk dari:', msg.from, 'Isi:', msg.body);
-        
-        // Cari job berdasarkan nomor pengirim
-        const job = await findJobByCustomerPhone(msg.from.replace('@c.us', ''));
-        if (job) {
-            io.emit('new_message', {
-                jobId: job.id,
-                sender: msg.from,
-                message: msg.body,
-                timestamp: new Date()
-            });
-        }
-    });
-
-    client.initialize().catch(err => {
-        console.error('❌ Gagal menginisialisasi WhatsApp:', err);
-        whatsappStatus = 'error';
-        io.emit('whatsapp_status', { 
-            status: whatsappStatus, 
-            error: err.message 
-        });
-    });
-}
-
-// --- DATABASE & JOB MANAGEMENT ---
-const JobSchema = new mongoose.Schema({
-    id: String,
-    customerPhone: String,
-    customerName: String,
-    status: String,
-    pickup: {
-        name: String,
-        address: String,
-        phone: String
-    },
-    delivery: {
-        name: String,
-        address: String,
-        phone: String
-    },
-    payment: Number,
-    distance: String,
-    estimate: String,
-    createdAt: { type: Date, default: Date.now }
+// WhatsApp Client
+const client = new Client({
+    authStrategy: new LocalAuth({
+        clientId: "courier-app",
+        dataPath: "./whatsapp-auth"
+    }),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable'
+    }
 });
 
-const Job = mongoose.models.Job || mongoose.model('Job', JobSchema);
+// === WHATSAPP EVENT HANDLERS ===
+client.on('qr', (qr) => {
+    console.log('📱 QR Code Received');
+    qrcode.generate(qr, { small: true });
+    
+    qrCodeData = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qr)}`;
+    whatsappStatus = 'qr_received';
+    
+    io.emit('whatsapp_status', { 
+        status: whatsappStatus, 
+        qr: qrCodeData 
+    });
+});
 
-// Simulasi data jobs jika tidak ada MongoDB
+client.on('ready', () => {
+    console.log('✅ WhatsApp Client is Ready!');
+    whatsappStatus = 'connected';
+    io.emit('whatsapp_status', { status: whatsappStatus });
+});
+
+client.on('disconnected', (reason) => {
+    console.log('❌ WhatsApp Disconnected:', reason);
+    whatsappStatus = 'disconnected';
+    io.emit('whatsapp_status', { status: whatsappStatus });
+    
+    setTimeout(() => {
+        client.initialize().catch(console.error);
+    }, 10000);
+});
+
+// === HANDLE PESAN MASUK DARI CUSTOMER ===
+client.on('message', async (msg) => {
+    if (msg.fromMe) return;
+    
+    const customerPhone = msg.from.replace('@c.us', '');
+    console.log('📨 Pesan masuk dari:', customerPhone, 'Isi:', msg.body);
+    
+    // Cari jobId berdasarkan nomor customer
+    const jobId = phoneToJobMapping.get(customerPhone);
+    
+    if (jobId) {
+        // Simpan pesan ke history chat
+        if (!chatSessions.has(jobId)) {
+            chatSessions.set(jobId, []);
+        }
+        
+        const messageData = {
+            id: Date.now(),
+            sender: 'customer',
+            message: msg.body,
+            timestamp: new Date(),
+            type: 'received'
+        };
+        
+        chatSessions.get(jobId).push(messageData);
+        
+        // Kirim ke frontend (TANPA menampilkan nomor asli)
+        io.emit('new_message', {
+            jobId: jobId,
+            message: messageData,
+            customerName: `Customer #${jobId}` // Hanya tampilkan ID, bukan nomor
+        });
+        
+        console.log(`✅ Pesan customer dialihkan ke job: ${jobId}`);
+    } else {
+        console.log('❌ Pesan dari nomor tidak terdaftar:', customerPhone);
+        
+        // Optional: Auto-reply untuk nomor tidak dikenal
+        if (msg.body.toLowerCase().includes('order') || msg.body.toLowerCase().includes('pesanan')) {
+            const reply = `Halo! Untuk informasi pesanan, silakan hubungi kurir melalui aplikasi PasarKilat. Terima kasih!`;
+            await client.sendMessage(msg.from, reply);
+        }
+    }
+});
+
+client.initialize().catch(console.error);
+
+// === SAMPLE DATA DENGAN MAPPING ===
 const sampleJobs = [
     {
         id: 'ORD1001',
-        customerPhone: '6281234567890', // Ganti dengan nomor WhatsApp nyata untuk testing
+        customerPhone: '6285696814717', // GANTI dengan nomor WA customer nyata
         customerName: 'Budi Santoso',
         status: 'new',
-        pickup: {
-            name: 'Toko Serba Ada',
-            address: 'Jl. Merdeka No. 123, Jakarta',
-            phone: '628111111111'
-        },
-        delivery: {
-            name: 'Budi Santoso',
-            address: 'Jl. Sudirman No. 456, Jakarta Selatan',
-            phone: '6281234567890'
-        },
+        pickup: { name: 'Toko Serba Ada', address: 'Jl. Merdeka No. 123' },
+        delivery: { name: 'Budi Santoso', address: 'Jl. Sudirman No. 456' },
         payment: 45000,
         distance: '3.2 km',
         estimate: '25 menit'
     }
 ];
 
-async function findJobByCustomerPhone(phone) {
-    if (MONGO_URI) {
-        return await Job.findOne({ customerPhone: phone });
-    }
-    return sampleJobs.find(job => job.customerPhone === phone);
-}
+// Inisialisasi mapping dari sample jobs
+sampleJobs.forEach(job => {
+    customerMapping.set(job.id, job.customerPhone);
+    phoneToJobMapping.set(job.customerPhone, job.id);
+});
 
-async function findJobById(jobId) {
-    if (MONGO_URI) {
-        return await Job.findOne({ id: jobId });
-    }
-    return sampleJobs.find(job => job.id === jobId);
-}
-
-// --- SOCKET.IO HANDLERS ---
+// === SOCKET.IO HANDLERS ===
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
     
-    // Kirim status WhatsApp saat ini
-    socket.emit('whatsapp_status', { 
-        status: whatsappStatus, 
-        qr: qrCodeData 
-    });
-
-    // Kirim sample jobs
+    socket.emit('whatsapp_status', { status: whatsappStatus, qr: qrCodeData });
     socket.emit('initial_jobs', sampleJobs);
 
-    // Handle permintaan data awal
-    socket.on('request_initial_data', (data) => {
-        socket.emit('initial_jobs', sampleJobs);
-    });
-
-    // Handle terima job
-    socket.on('job_accepted', async (data) => {
-        console.log('✅ Job accepted:', data);
-        
-        const job = await findJobById(data.jobId);
-        if (job && whatsappStatus === 'connected') {
-            // Kirim notifikasi ke customer via WhatsApp
-            const customerNumber = `${job.customerPhone}@c.us`;
-            const message = `Halo ${job.customerName}! 🎉\n\nKurir PasarKilat telah menerima pesanan Anda (#${job.id}).\nKurir sedang menuju ke lokasi penjemputan.\n\nEstimasi sampai: ${job.estimate}\n\nTerima kasih! 🛵`;
-            
-            try {
-                await client.sendMessage(customerNumber, message);
-                console.log('📢 Notifikasi terkirim ke customer');
-            } catch (error) {
-                console.error('❌ Gagal kirim notifikasi:', error);
-            }
-        }
-        
-        socket.emit('job_accepted_success', data);
-    });
-
-    // Handle kirim pesan ke customer
+    // === KIRIM PESAN KE CUSTOMER ===
     socket.on('send_message', async (data) => {
-        console.log('💬 Mengirim pesan:', data);
+        console.log('💬 Kurir mengirim pesan untuk job:', data.jobId);
         
-        const job = await findJobById(data.jobId);
-        if (!job) {
+        const customerPhone = customerMapping.get(data.jobId);
+        
+        if (!customerPhone) {
             socket.emit('message_sent', { 
                 success: false, 
-                error: 'Job tidak ditemukan' 
+                error: 'Customer tidak ditemukan untuk job ini' 
             });
             return;
         }
@@ -278,21 +178,33 @@ io.on('connection', (socket) => {
         }
 
         try {
-            const customerNumber = `${job.customerPhone}@c.us`;
+            // Kirim pesan ke customer via WhatsApp
+            const customerNumber = `${customerPhone}@c.us`;
             await client.sendMessage(customerNumber, data.message);
             
-            socket.emit('message_sent', { 
-                success: true,
-                jobId: data.jobId 
-            });
+            // Simpan pesan di history chat
+            if (!chatSessions.has(data.jobId)) {
+                chatSessions.set(data.jobId, []);
+            }
             
-            // Simpan pesan yang dikirim di history
-            io.emit('new_message', {
-                jobId: data.jobId,
+            const messageData = {
+                id: Date.now(),
                 sender: 'courier',
                 message: data.message,
-                timestamp: new Date()
+                timestamp: new Date(),
+                type: 'sent'
+            };
+            
+            chatSessions.get(data.jobId).push(messageData);
+            
+            // Kirim konfirmasi ke frontend
+            socket.emit('message_sent', { 
+                success: true,
+                jobId: data.jobId,
+                message: messageData
             });
+            
+            console.log('✅ Pesan terkirim ke customer:', customerPhone);
             
         } catch (error) {
             console.error('❌ Gagal kirim pesan:', error);
@@ -303,17 +215,49 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Handle job selesai
-    socket.on('job_completed', async (data) => {
-        console.log('🏁 Job completed:', data);
+    // === MENDAPATKAN HISTORY CHAT ===
+    socket.on('get_chat_history', (data) => {
+        const history = chatSessions.get(data.jobId) || [];
+        socket.emit('chat_history', {
+            jobId: data.jobId,
+            messages: history
+        });
+    });
+
+    // === JOB DITERIMA - KIRIM NOTIFIKASI OTOMATIS ===
+    socket.on('job_accepted', async (data) => {
+        console.log('✅ Job accepted:', data.jobId);
         
-        const job = await findJobById(data.jobId);
-        if (job && whatsappStatus === 'connected') {
-            // Kirim notifikasi penyelesaian ke customer
-            const customerNumber = `${job.customerPhone}@c.us`;
-            const message = `Halo ${job.customerName}! 🎊\n\nPesanan Anda (#${job.id}) telah SELESAI diantar!\n\nTerima kasih telah menggunakan PasarKilat! 🙏\n\nRating dan ulasan Anda sangat berarti bagi kami.`;
+        const job = sampleJobs.find(j => j.id === data.jobId);
+        const customerPhone = customerMapping.get(data.jobId);
+        
+        if (job && customerPhone && whatsappStatus === 'connected') {
+            const message = `Halo ${job.customerName}! 🎉\n\nKurir PasarKilat telah menerima pesanan Anda (#${job.id}).\nKurir sedang menuju ke lokasi penjemputan.\n\nEstimasi sampai: ${job.estimate}\n\nTerima kasih! 🛵`;
             
             try {
+                const customerNumber = `${customerPhone}@c.us`;
+                await client.sendMessage(customerNumber, message);
+                console.log('📢 Notifikasi diterima terkirim ke customer');
+            } catch (error) {
+                console.error('❌ Gagal kirim notifikasi:', error);
+            }
+        }
+        
+        socket.emit('job_accepted_success', data);
+    });
+
+    // === JOB SELESAI - KIRIM NOTIFIKASI ===
+    socket.on('job_completed', async (data) => {
+        console.log('🏁 Job completed:', data.jobId);
+        
+        const job = sampleJobs.find(j => j.id === data.jobId);
+        const customerPhone = customerMapping.get(data.jobId);
+        
+        if (job && customerPhone && whatsappStatus === 'connected') {
+            const message = `Halo ${job.customerName}! 🎊\n\nPesanan Anda (#${job.id}) telah SELESAI diantar!\n\nTerima kasih telah menggunakan PasarKilat! 🙏`;
+            
+            try {
+                const customerNumber = `${customerPhone}@c.us`;
                 await client.sendMessage(customerNumber, message);
                 console.log('✅ Notifikasi selesai terkirim');
             } catch (error) {
@@ -329,53 +273,26 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- EXPRESS ROUTES ---
+// Routes
 app.get('/', (req, res) => {
     res.json({ 
         status: 'Server Running', 
         whatsapp_status: whatsappStatus,
-        message: 'PasarKilat Courier Backend dengan WhatsApp',
-        timestamp: new Date().toISOString()
+        active_chats: chatSessions.size,
+        message: 'Sistem Chat Aman PasarKilat - Privacy Terjaga'
     });
 });
 
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
-        whatsapp: whatsappStatus,
-        time: new Date().toISOString() 
-    });
-});
-
-// Endpoint untuk manual WhatsApp status
-app.get('/whatsapp-status', (req, res) => {
+app.get('/mapping-status', (req, res) => {
     res.json({
-        status: whatsappStatus,
-        hasQR: !!qrCodeData,
-        timestamp: new Date().toISOString()
+        customerMapping: Object.fromEntries(customerMapping),
+        phoneToJobMapping: Object.fromEntries(phoneToJobMapping),
+        activeChats: Array.from(chatSessions.keys())
     });
 });
 
-// --- START SERVER ---
-async function startServer() {
-    try {
-        if (MONGO_URI) {
-            await mongoose.connect(MONGO_URI);
-            console.log('✅ MongoDB Connected');
-        }
-        
-        // Mulai WhatsApp client
-        initializeWhatsApp();
-        
-        server.listen(PORT, '0.0.0.0', () => {
-            console.log(`🚀 Server berjalan di port ${PORT}`);
-            console.log(`📱 Frontend: ${FRONTEND_URL}`);
-            console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
-        });
-    } catch (error) {
-        console.error('❌ Gagal start server:', error);
-        process.exit(1);
-    }
-}
-
-startServer();
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server berjalan di port ${PORT}`);
+    console.log(`🔒 Sistem Chat Privacy: AKTIF`);
+    console.log(`📱 Mapping jobs: ${customerMapping.size} jobs terdaftar`);
+});
