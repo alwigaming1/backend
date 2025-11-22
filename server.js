@@ -1,4 +1,4 @@
-// server.js - BACKEND FINAL UNTUK FUNGSI WHATSAPP NYATA
+// server.js - BACKEND FINAL (KONFIRMASI PERBAIKAN CORS DAN WA LOGIC)
 
 const express = require('express');
 const http = require('http');
@@ -10,7 +10,6 @@ const cors = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js'); 
 const qrcode = require('qrcode-terminal');             
 
-// Muat variabel lingkungan
 dotenv.config();
 
 const app = express();
@@ -21,15 +20,15 @@ const server = http.createServer(app);
 // ------------------------------------------
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI; 
-// ⚠️ GANTI DENGAN URL FRONTEND ASLI ANDA
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://pasarkilat-app.vercel.app"; 
+// KONFIRMASI: URL FRONTEND VERCEL ANDA
+const FRONTEND_URL = "https://pasarkilat-app.vercel.app"; 
 
 // ------------------------------------------
 // 2. Konfigurasi Socket.IO dan CORS 
 // ------------------------------------------
 const io = new Server(server, {
     cors: {
-        origin: FRONTEND_URL, // Izinkan koneksi dari frontend Anda
+        origin: FRONTEND_URL, // Mengizinkan HANYA dari Vercel Anda
         methods: ["GET", "POST"]
     }
 });
@@ -39,7 +38,7 @@ app.use(cors());
 app.use(express.json());
 
 // ------------------------------------------
-// 3. MONGODB (Diperlukan untuk menyimpan customerPhone)
+// 3. MONGODB (Opsional, untuk menyimpan customerPhone)
 // ------------------------------------------
 if (!MONGO_URI) {
     console.warn('⚠️ WARNING: Variabel MONGO_URI tidak ditemukan. Menggunakan data simulasi Job.');
@@ -64,7 +63,6 @@ const Job = mongoose.model('Job', JobSchema);
 let whatsappStatus = 'disconnected';
 let qrCodeData = null; 
 
-// Inisialisasi Klien WhatsApp
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: 'courier_app' }),
     puppeteer: {
@@ -92,7 +90,7 @@ client.on('disconnected', (reason) => {
     whatsappStatus = 'disconnected';
     qrCodeData = null;
     io.emit('whatsapp_status', { status: whatsappStatus, qr: null });
-    // Coba inisialisasi ulang
+    // Coba inisialisasi ulang setelah terputus
     setTimeout(() => client.initialize().catch(err => console.error('Gagal re-init WA:', err)), 15000);
 });
 
@@ -100,7 +98,8 @@ client.on('message', async (msg) => {
     if (msg.fromMe) return; 
     
     const customerNumber = msg.from.replace('@c.us', ''); 
-    // Kirim notifikasi pesan ke frontend
+    // Di sini Anda perlu mencocokkan customerNumber dengan jobId yang aktif.
+    // Karena ini sulit dilakukan tanpa DB lengkap, kita gunakan ID dummy:
     io.emit('new_message', {
         jobId: 'WA_INCOMING', 
         sender: customerNumber,
@@ -111,9 +110,8 @@ client.on('message', async (msg) => {
 client.initialize().catch(err => console.error('Gagal inisialisasi WA:', err));
 
 
-// --- SIMULASI DATA/LOGIC (Jika MongoDB tidak terhubung) ---
+// --- SIMULASI DATA/LOGIC ---
 const backendState = {
-    // Tambahkan data simulasi yang sama dengan courier-app.js
     jobs: [
         { id: '1001', customerPhone: '628123456789', status: 'on_delivery', pickup: { name: 'Gudang A', address: 'Jl. Contoh No. 1' } },
         { id: '1002', customerPhone: '6285000999888', status: 'on_delivery', pickup: { name: 'Toko B', address: 'Jl. Mawar No. 5' } }
