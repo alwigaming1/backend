@@ -1,4 +1,4 @@
-// server.js - FIXED VERSION
+// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -24,9 +24,9 @@ let whatsappStatus = 'disconnected';
 let qrCodeData = null;
 
 // === SISTEM MAPPING YANG DIPERBAIKI ===
-const customerMapping = new Map(); // jobId -> customerPhone
-const phoneToJobMapping = new Map(); // customerPhone -> jobId
-const chatSessions = new Map(); // jobId -> chat history
+const customerMapping = new Map();
+const phoneToJobMapping = new Map();
+const chatSessions = new Map();
 
 // WhatsApp Client
 const client = new Client({
@@ -65,12 +65,6 @@ client.on('ready', () => {
     console.log('✅ WhatsApp Client is Ready!');
     whatsappStatus = 'connected';
     io.emit('whatsapp_status', { status: whatsappStatus });
-    
-    // Debug: Tampilkan mapping yang aktif
-    console.log('🗺️ Active Mapping:', {
-        customerMapping: Array.from(customerMapping.entries()),
-        phoneToJobMapping: Array.from(phoneToJobMapping.entries())
-    });
 });
 
 client.on('disconnected', (reason) => {
@@ -115,15 +109,30 @@ client.on('message', async (msg) => {
         
     } else {
         console.log('❌ Pesan dari nomor tidak terdaftar:', customerPhone);
-        console.log('📋 Daftar mapping:', Array.from(phoneToJobMapping.entries()));
+        
+        // Coba cari jobId dari pesan (jika customer menyebutkan ID job)
+        const jobIdMatch = msg.body.match(/#(\w+)/);
+        if (jobIdMatch) {
+            const extractedJobId = jobIdMatch[1];
+            console.log(`🔍 Mencoba mapping otomatis: ${customerPhone} -> ${extractedJobId}`);
+            phoneToJobMapping.set(customerPhone, extractedJobId);
+            customerMapping.set(extractedJobId, customerPhone);
+        }
     }
 });
 
-// === SAMPLE DATA - GUNAKAN NOMOR ANDA UNTUK TESTING ===
+// === SAMPLE DATA DENGAN NOMOR TESTING ===
+// ⚠️ GANTI NOMOR-NOMOR INI DENGAN NOMOR WA ANDA UNTUK TESTING!
+const TEST_PHONES = [
+    '6282195036971',  // Ganti dengan nomor WA Anda
+    '6282195036971',  // Ganti dengan nomor WA lain (atau sama)
+    '6282195036971'   // Ganti dengan nomor WA lain (atau sama)
+];
+
 const sampleJobs = [
     {
         id: 'ORD1001',
-        customerPhone: '628123456789', // ⚠️ GANTI dengan nomor WA ANDA untuk testing
+        customerPhone: TEST_PHONES[0],
         customerName: 'Budi Santoso',
         status: 'new',
         pickup: { name: 'Toko Serba Ada', address: 'Jl. Merdeka No. 123' },
@@ -133,8 +142,8 @@ const sampleJobs = [
         estimate: '25 menit'
     },
     {
-        id: 'ORD1002', 
-        customerPhone: '6282195036971', // ⚠️ GANTI dengan nomor WA lain atau sama
+        id: 'ORD1002',
+        customerPhone: TEST_PHONES[1],
         customerName: 'Siti Rahayu',
         status: 'new',
         pickup: { name: 'Restoran Cepat Saji', address: 'Jl. Gatot Subroto No. 78' },
@@ -145,13 +154,13 @@ const sampleJobs = [
     }
 ];
 
-// Inisialisasi mapping dari sample jobs
+// === AUTO-MAPPING SYSTEM UNTUK JOB SIMULASI ===
 function initializeMappings() {
     customerMapping.clear();
     phoneToJobMapping.clear();
     
+    // Mapping untuk sample jobs
     sampleJobs.forEach(job => {
-        // Format nomor: hapus karakter non-digit dan pastikan format 62
         const cleanPhone = job.customerPhone.replace(/\D/g, '');
         customerMapping.set(job.id, cleanPhone);
         phoneToJobMapping.set(cleanPhone, job.id);
@@ -159,9 +168,34 @@ function initializeMappings() {
     
     console.log('🔄 Mapping initialized:', {
         jobs: sampleJobs.length,
-        customerMapping: Array.from(customerMapping.entries()),
-        phoneToJobMapping: Array.from(phoneToJobMapping.entries())
+        customerMapping: Array.from(customerMapping.entries())
     });
+}
+
+// Fungsi untuk membuat mapping otomatis untuk job simulasi
+function createSimulatedJobMapping(jobId) {
+    // Pilih nomor acak dari TEST_PHONES untuk job simulasi
+    const randomPhone = TEST_PHONES[Math.floor(Math.random() * TEST_PHONES.length)];
+    const cleanPhone = randomPhone.replace(/\D/g, '');
+    
+    customerMapping.set(jobId, cleanPhone);
+    phoneToJobMapping.set(cleanPhone, jobId);
+    
+    console.log(`🔗 Auto-mapping created: ${jobId} -> ${cleanPhone}`);
+    
+    return cleanPhone;
+}
+
+// Fungsi untuk mendapatkan atau membuat mapping untuk job
+function getOrCreateCustomerPhone(jobId) {
+    let customerPhone = customerMapping.get(jobId);
+    
+    if (!customerPhone && jobId.startsWith('SIM')) {
+        // Buat mapping otomatis untuk job simulasi
+        customerPhone = createSimulatedJobMapping(jobId);
+    }
+    
+    return customerPhone;
 }
 
 initializeMappings();
@@ -170,13 +204,11 @@ initializeMappings();
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
     
-    // Kirim status WhatsApp saat ini
     socket.emit('whatsapp_status', { 
         status: whatsappStatus, 
         qr: qrCodeData 
     });
 
-    // Kirim sample jobs
     socket.emit('initial_jobs', sampleJobs);
 
     // === KIRIM PESAN KE CUSTOMER ===
@@ -186,13 +218,14 @@ io.on('connection', (socket) => {
             message: data.message
         });
         
-        const customerPhone = customerMapping.get(data.jobId);
+        // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
+        const customerPhone = getOrCreateCustomerPhone(data.jobId);
         
         if (!customerPhone) {
-            console.error('❌ Customer tidak ditemukan untuk job:', data.jobId);
+            console.error('❌ Tidak bisa membuat mapping untuk job:', data.jobId);
             socket.emit('message_sent', { 
                 success: false, 
-                error: 'Customer tidak ditemukan untuk job ini' 
+                error: 'Tidak dapat menemukan customer untuk job ini' 
             });
             return;
         }
@@ -201,7 +234,7 @@ io.on('connection', (socket) => {
             console.error('❌ WhatsApp belum terhubung');
             socket.emit('message_sent', { 
                 success: false, 
-                error: 'WhatsApp belum terhubung. Status: ' + whatsappStatus 
+                error: 'WhatsApp belum terhubung' 
             });
             return;
         }
@@ -256,6 +289,16 @@ io.on('connection', (socket) => {
         });
     });
 
+    // === HANDLE JOB ACCEPTED (UNTUK SIMULASI) ===
+    socket.on('job_accepted', async (data) => {
+        console.log('✅ Job accepted:', data.jobId);
+        
+        // Buat mapping untuk job yang diterima (jika belum ada)
+        getOrCreateCustomerPhone(data.jobId);
+        
+        socket.emit('job_accepted_success', data);
+    });
+
     // === DEBUG: LOG SEMUA EVENT ===
     socket.onAny((eventName, ...args) => {
         console.log(`🔍 Socket Event: ${eventName}`, args);
@@ -275,7 +318,8 @@ app.get('/', (req, res) => {
         mappings: {
             customerMapping: Array.from(customerMapping.entries()),
             phoneToJobMapping: Array.from(phoneToJobMapping.entries())
-        }
+        },
+        test_phones: TEST_PHONES
     });
 });
 
@@ -301,5 +345,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
-    console.log(`🗺️ Job Mapping: ${customerMapping.size} jobs`);
+    console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
+    console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
+    console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
 });
