@@ -194,6 +194,7 @@ io.on('connection', (socket) => {
             console.log(`Kurir ${courierId} terputus.`);
         }
     });
+});
 
 
 // --- EXPRESS ENDPOINTS ---
