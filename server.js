@@ -92,7 +92,7 @@ client.on('message', async (msg) => {
         }
         
         const messageData = {
-            id: Date.now(),
+            id: Date.now().toString(),
             sender: 'customer',
             message: msg.body,
             timestamp: new Date(),
@@ -101,11 +101,13 @@ client.on('message', async (msg) => {
         
         chatSessions.get(jobId).push(messageData);
         
-        // Kirim ke SEMUA client yang terhubung
+        // PERBAIKAN: Kirim ke SEMUA client yang terhubung dengan struktur yang benar
         io.emit('new_message', {
             jobId: jobId,
             message: messageData
         });
+        
+        console.log(`📤 Event new_message dikirim untuk job: ${jobId}`);
         
     } else {
         console.log('❌ Pesan dari nomor tidak terdaftar:', customerPhone);
@@ -117,6 +119,12 @@ client.on('message', async (msg) => {
             console.log(`🔍 Mencoba mapping otomatis: ${customerPhone} -> ${extractedJobId}`);
             phoneToJobMapping.set(customerPhone, extractedJobId);
             customerMapping.set(extractedJobId, customerPhone);
+            
+            // Kirim notifikasi mapping berhasil
+            io.emit('mapping_created', {
+                phone: customerPhone,
+                jobId: extractedJobId
+            });
         }
     }
 });
@@ -252,7 +260,7 @@ io.on('connection', (socket) => {
             }
             
             const messageData = {
-                id: Date.now(),
+                id: Date.now().toString(),
                 sender: 'courier',
                 message: data.message,
                 timestamp: new Date(),
