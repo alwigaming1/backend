@@ -1,4 +1,4 @@
-// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS
+// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS DAN FITUR TELEPON
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -132,9 +132,8 @@ client.on('message', async (msg) => {
 // === SAMPLE DATA DENGAN NOMOR TESTING ===
 // ⚠️ GANTI NOMOR-NOMOR INI DENGAN NOMOR WA ANDA UNTUK TESTING!
 const TEST_PHONES = [
-    '6282195036971',  // Ganti dengan nomor WA Anda
-    '6282195036971',  // Ganti dengan nomor WA lain (atau sama)
-    '6282195036971'   // Ganti dengan nomor WA lain (atau sama)
+    '6281234567890',  // Ganti dengan nomor WA Anda
+    '6289876543210'   // Ganti dengan nomor WA lain
 ];
 
 const sampleJobs = [
@@ -208,7 +207,7 @@ function getOrCreateCustomerPhone(jobId) {
 
 initializeMappings();
 
-// === SOCKET.IO HANDLERS YANG DIPERBAIKI ===
+// === TELEPHONE HANDLERS ===
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
     
@@ -218,6 +217,65 @@ io.on('connection', (socket) => {
     });
 
     socket.emit('initial_jobs', sampleJobs);
+
+    // === HANDLE REQUEST NOMOR CUSTOMER UNTUK TELEPON ===
+    socket.on('request_customer_phone', (data) => {
+        console.log('📞 [BACKEND] Received request_customer_phone:', data);
+        
+        if (!data || !data.jobId) {
+            console.log('❌ [BACKEND] Invalid data received:', data);
+            socket.emit('customer_phone_received', {
+                success: false,
+                error: 'Data tidak valid'
+            });
+            return;
+        }
+
+        const jobId = data.jobId;
+        console.log('🔍 [BACKEND] Looking for phone mapping for job:', jobId);
+        
+        // Debug: log semua mapping yang ada
+        console.log('📋 [BACKEND] Current customer mappings:', Array.from(customerMapping.entries()));
+
+        // Cari nomor customer berdasarkan jobId
+        let customerPhone = customerMapping.get(jobId);
+        
+        if (!customerPhone) {
+            console.log('🔄 [BACKEND] No mapping found, creating new one for:', jobId);
+            customerPhone = getOrCreateCustomerPhone(jobId);
+            console.log('✅ [BACKEND] New mapping created:', customerPhone);
+        }
+        
+        if (customerPhone) {
+            console.log('✅ [BACKEND] Phone found:', customerPhone);
+            
+            // Pastikan format nomor benar
+            const cleanPhone = customerPhone.replace(/\D/g, '');
+            console.log('🔧 [BACKEND] Clean phone number:', cleanPhone);
+            
+            socket.emit('customer_phone_received', {
+                success: true,
+                jobId: jobId,
+                phone: cleanPhone
+            });
+            
+            console.log('📤 [BACKEND] Sent customer_phone_received event');
+            
+        } else {
+            console.log('❌ [BACKEND] No phone number available for job:', jobId);
+            
+            socket.emit('customer_phone_received', {
+                success: false,
+                jobId: jobId,
+                error: 'Nomor customer tidak tersedia'
+            });
+        }
+    });
+
+    socket.on('call_log', (data) => {
+        console.log('📞 Log panggilan:', data);
+        // Simpan log panggilan ke database atau console
+    });
 
     // === KIRIM PESAN KE CUSTOMER ===
     socket.on('send_message', async (data) => {
@@ -343,6 +401,15 @@ app.get('/debug', (req, res) => {
     });
 });
 
+// Route untuk debug telepon
+app.get('/call-debug', (req, res) => {
+    res.json({
+        customerMapping: Array.from(customerMapping.entries()),
+        phoneToJobMapping: Array.from(phoneToJobMapping.entries()),
+        test_phones: TEST_PHONES
+    });
+});
+
 // Initialize WhatsApp
 client.initialize().catch(err => {
     console.error('❌ Gagal inisialisasi WhatsApp:', err);
@@ -356,4 +423,5 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
     console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
+    console.log(`📞 FITUR TELEPON: AKTIF - Customer menerima panggilan di WhatsApp`);
 });
