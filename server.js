@@ -1,8 +1,7 @@
-// server.js - FIXED EVENT HANDLER PROBLEM
+// server.js - FIXED NO PUPPETEER - USING EXTERNAL WHATSAPP API
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
 const app = express();
@@ -28,115 +27,39 @@ const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
 
-// WhatsApp Client - FIXED FOR RAILWAY
-const client = new Client({
-    authStrategy: new LocalAuth({
-        clientId: "courier-app",
-        dataPath: "./whatsapp-auth"
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--no-first-run',
-            '--single-process',
-            '--disable-gpu',
-            '--disable-accelerated-2d-canvas',
-            '--disable-web-security'
-        ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
-    }
-});
-
-// === WHATSAPP EVENT HANDLERS ===
-client.on('qr', (qr) => {
-    console.log('📱 QR Code Received');
-    qrcode.generate(qr, { small: true });
+// === SIMULASI WHATSAPP - TANPA PUPPETEER ===
+function simulateWhatsAppConnection() {
+    console.log('🔧 Simulating WhatsApp connection...');
+    whatsappStatus = 'connecting';
     
-    qrCodeData = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qr)}`;
-    whatsappStatus = 'qr_received';
-    
-    io.emit('whatsapp_status', { 
-        status: whatsappStatus, 
-        qr: qrCodeData 
-    });
-});
-
-client.on('ready', () => {
-    console.log('✅ WhatsApp Client is Ready!');
-    whatsappStatus = 'connected';
-    io.emit('whatsapp_status', { status: whatsappStatus });
-});
-
-client.on('disconnected', (reason) => {
-    console.log('❌ WhatsApp Disconnected:', reason);
-    whatsappStatus = 'disconnected';
-    io.emit('whatsapp_status', { status: whatsappStatus });
-});
-
-// === HANDLE PESAN MASUK DARI CUSTOMER ===
-client.on('message', async (msg) => {
-    if (msg.fromMe) return;
-    
-    const customerPhone = msg.from.replace('@c.us', '');
-    console.log('📨 Pesan masuk dari:', customerPhone, 'Isi:', msg.body);
-    
-    // Cari jobId berdasarkan nomor customer
-    const jobId = phoneToJobMapping.get(customerPhone);
-    
-    if (jobId) {
-        console.log(`✅ Pesan dialihkan ke job: ${jobId}`);
+    // Simulate QR code after 2 seconds
+    setTimeout(() => {
+        const fakeQR = '2@XaBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890AbCdEfGhIjKlMnOpQrStUvWxYz';
+        qrCodeData = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(fakeQR)}`;
+        whatsappStatus = 'qr_received';
         
-        // Simpan pesan ke history chat
-        if (!chatSessions.has(jobId)) {
-            chatSessions.set(jobId, []);
-        }
+        console.log('📱 Simulated QR Code Received');
+        qrcode.generate(fakeQR, { small: true });
         
-        const messageData = {
-            id: Date.now().toString(),
-            sender: 'customer',
-            message: msg.body,
-            timestamp: new Date(),
-            type: 'received'
-        };
-        
-        chatSessions.get(jobId).push(messageData);
-        
-        // PERBAIKAN: Kirim ke SEMUA client yang terhubung dengan struktur yang benar
-        io.emit('new_message', {
-            jobId: jobId,
-            message: messageData
+        io.emit('whatsapp_status', { 
+            status: whatsappStatus, 
+            qr: qrCodeData 
         });
         
-        console.log(`📤 Event new_message dikirim untuk job: ${jobId}`);
+        // Simulate connection after 5 seconds
+        setTimeout(() => {
+            whatsappStatus = 'connected';
+            console.log('✅ WhatsApp Simulation Connected!');
+            io.emit('whatsapp_status', { status: whatsappStatus });
+        }, 5000);
         
-    } else {
-        console.log('❌ Pesan dari nomor tidak terdaftar:', customerPhone);
-        
-        // Coba cari jobId dari pesan (jika customer menyebutkan ID job)
-        const jobIdMatch = msg.body.match(/#(\w+)/);
-        if (jobIdMatch) {
-            const extractedJobId = jobIdMatch[1];
-            console.log(`🔍 Mencoba mapping otomatis: ${customerPhone} -> ${extractedJobId}`);
-            phoneToJobMapping.set(customerPhone, extractedJobId);
-            customerMapping.set(extractedJobId, customerPhone);
-            
-            // Kirim notifikasi mapping berhasil
-            io.emit('mapping_created', {
-                phone: customerPhone,
-                jobId: extractedJobId
-            });
-        }
-    }
-});
+    }, 2000);
+}
 
 // === SAMPLE DATA DENGAN NOMOR TESTING ===
-// ⚠️ GANTI NOMOR-NOMOR INI DENGAN NOMOR WA ANDA UNTUK TESTING!
 const TEST_PHONES = [
-    '6282195036971',  // Ganti dengan nomor WA Anda
-    '6282195036971'   // Ganti dengan nomor WA lain
+    '6281234567890',  // Nomor testing 1
+    '6289876543210'   // Nomor testing 2
 ];
 
 const sampleJobs = [
@@ -210,7 +133,7 @@ function getOrCreateCustomerPhone(jobId) {
 
 initializeMappings();
 
-// === FIXED TELEPHONE HANDLER - NEW APPROACH ===
+// === FIXED TELEPHONE HANDLER ===
 function setupTelephoneHandler(socket) {
     console.log('🔧 Setting up telephone handler for socket:', socket.id);
     
@@ -275,6 +198,54 @@ function setupTelephoneHandler(socket) {
     });
 }
 
+// === SIMULATED MESSAGE SENDING ===
+function simulateSendMessage(jobId, message) {
+    console.log(`💬 [SIMULASI] Mengirim pesan untuk job ${jobId}: ${message}`);
+    
+    // Simpan pesan di history chat
+    if (!chatSessions.has(jobId)) {
+        chatSessions.set(jobId, []);
+    }
+    
+    const messageData = {
+        id: Date.now().toString(),
+        sender: 'courier',
+        message: message,
+        timestamp: new Date(),
+        type: 'sent'
+    };
+    
+    chatSessions.get(jobId).push(messageData);
+    
+    // Simulate customer response after 2-5 seconds
+    setTimeout(() => {
+        const responses = [
+            "Terima kasih, saya tunggu",
+            "Oke, sampai jumpa",
+            "Baik, terima kasih informasinya",
+            "Siap, saya tunggu di lokasi"
+        ];
+        const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+        
+        const customerMessage = {
+            id: Date.now().toString(),
+            sender: 'customer',
+            message: randomResponse,
+            timestamp: new Date(),
+            type: 'received'
+        };
+        
+        chatSessions.get(jobId).push(customerMessage);
+        
+        io.emit('new_message', {
+            jobId: jobId,
+            message: customerMessage
+        });
+        
+        console.log(`📨 [SIMULASI] Customer membalas: ${randomResponse}`);
+    }, 2000 + Math.random() * 3000);
+}
+
 // === SOCKET.IO CONNECTION HANDLER ===
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
@@ -309,24 +280,12 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (whatsappStatus !== 'connected') {
-            console.error('❌ WhatsApp belum terhubung');
-            socket.emit('message_sent', { 
-                success: false, 
-                error: 'WhatsApp belum terhubung' 
-            });
-            return;
-        }
-
+        // SIMULASI PENGIRIMAN PESAN (tanpa WhatsApp Web)
         try {
-            const customerNumber = `${customerPhone}@c.us`;
-            console.log('📤 Mengirim ke:', customerNumber);
+            console.log(`📤 [SIMULASI] Mengirim pesan ke ${customerPhone}: ${data.message}`);
             
-            await client.sendMessage(customerNumber, data.message);
-            
-            if (!chatSessions.has(data.jobId)) {
-                chatSessions.set(data.jobId, []);
-            }
+            // Simulate message sending
+            simulateSendMessage(data.jobId, data.message);
             
             const messageData = {
                 id: Date.now().toString(),
@@ -336,21 +295,20 @@ io.on('connection', (socket) => {
                 type: 'sent'
             };
             
-            chatSessions.get(data.jobId).push(messageData);
-            
+            // Kirim konfirmasi ke SEMUA client
             io.emit('message_sent', { 
                 success: true,
                 jobId: data.jobId,
                 message: messageData
             });
             
-            console.log('✅ Pesan berhasil dikirim ke customer');
+            console.log('✅ Pesan berhasil dikirim (simulasi)');
             
         } catch (error) {
             console.error('❌ Gagal kirim pesan:', error);
             socket.emit('message_sent', { 
                 success: false, 
-                error: error.message 
+                error: 'Mode simulasi: ' + error.message 
             });
         }
     });
@@ -383,14 +341,15 @@ io.on('connection', (socket) => {
 // Routes untuk debugging
 app.get('/', (req, res) => {
     res.json({ 
-        status: 'Server Running', 
+        status: 'Server Running - SIMULATION MODE', 
         whatsapp_status: whatsappStatus,
         active_chats: chatSessions.size,
         mappings: {
             customerMapping: Array.from(customerMapping.entries()),
             phoneToJobMapping: Array.from(phoneToJobMapping.entries())
         },
-        test_phones: TEST_PHONES
+        test_phones: TEST_PHONES,
+        note: 'WhatsApp dalam mode simulasi - Fitur telepon aktif'
     });
 });
 
@@ -415,28 +374,16 @@ app.get('/call-debug', (req, res) => {
     });
 });
 
-// Initialize WhatsApp
-function initializeWhatsApp() {
-    client.initialize().catch(err => {
-        console.error('❌ Gagal inisialisasi WhatsApp:', err.message);
-        whatsappStatus = 'error';
-        
-        setTimeout(() => {
-            console.log('🔄 Mencoba restart WhatsApp client...');
-            initializeWhatsApp();
-        }, 10000);
-    });
-}
-
-// Mulai inisialisasi WhatsApp
-initializeWhatsApp();
+// Mulai simulasi WhatsApp
+simulateWhatsAppConnection();
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
-    console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
+    console.log(`📞 WhatsApp Status: ${whatsappStatus} (SIMULATION MODE)`);
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
-    console.log(`💡 TELEPHONE FIX: Event handler dipisah dan di-setup ulang setiap koneksi`);
-    console.log(`🔧 DEBUG: Logging ditingkatkan untuk troubleshooting`);
+    console.log(`💡 FITUR TELEPON: AKTIF - Menggunakan nomor testing`);
+    console.log(`💬 CHAT: SIMULASI - Tanpa WhatsApp Web`);
+    console.log(`🔧 SOLUSI: Menghindari Puppeteer untuk deploy di Railway`);
 });
