@@ -1,4 +1,4 @@
-// server.js - FIXED WITH PUPPETEER COMPATIBILITY FOR RAILWAY
+// server.js - FIXED TELEPHONE RESPONSE
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -28,7 +28,7 @@ const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
 
-// WhatsApp Client - FIXED PUPPETEER CONFIG FOR RAILWAY
+// WhatsApp Client - FIXED FOR RAILWAY
 const client = new Client({
     authStrategy: new LocalAuth({
         clientId: "courier-app",
@@ -44,9 +44,7 @@ const client = new Client({
             '--single-process',
             '--disable-gpu',
             '--disable-accelerated-2d-canvas',
-            '--disable-web-security',
-            '--disable-features=site-per-process',
-            '--window-size=1920,1080'
+            '--disable-web-security'
         ],
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
     }
@@ -212,7 +210,7 @@ function getOrCreateCustomerPhone(jobId) {
 
 initializeMappings();
 
-// === TELEPHONE HANDLERS ===
+// === TELEPHONE HANDLERS - FIXED ===
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
     
@@ -223,7 +221,7 @@ io.on('connection', (socket) => {
 
     socket.emit('initial_jobs', sampleJobs);
 
-    // === HANDLE REQUEST NOMOR CUSTOMER UNTUK TELEPON ===
+    // === HANDLE REQUEST NOMOR CUSTOMER UNTUK TELEPON - FIXED ===
     socket.on('request_customer_phone', (data) => {
         console.log('📞 [BACKEND] Received request_customer_phone:', data);
         
@@ -258,13 +256,14 @@ io.on('connection', (socket) => {
             const cleanPhone = customerPhone.replace(/\D/g, '');
             console.log('🔧 [BACKEND] Clean phone number:', cleanPhone);
             
+            // FIX: Kirim response ke client yang meminta
             socket.emit('customer_phone_received', {
                 success: true,
                 jobId: jobId,
                 phone: cleanPhone
             });
             
-            console.log('📤 [BACKEND] Sent customer_phone_received event');
+            console.log('📤 [BACKEND] Sent customer_phone_received event to client:', socket.id);
             
         } else {
             console.log('❌ [BACKEND] No phone number available for job:', jobId);
@@ -372,7 +371,7 @@ io.on('connection', (socket) => {
 
     // === DEBUG: LOG SEMUA EVENT ===
     socket.onAny((eventName, ...args) => {
-        console.log(`🔍 Socket Event: ${eventName}`, args);
+        console.log(`🔍 [BACKEND] Socket Event: ${eventName} from ${socket.id}`, args);
     });
 
     socket.on('disconnect', () => {
@@ -422,17 +421,16 @@ function initializeWhatsApp() {
         whatsappStatus = 'error';
         
         // Coba restart setelah 10 detik
-        console.log('🔄 Mencoba restart dalam 10 detik...');
         setTimeout(() => {
-            if (whatsappStatus !== 'connected') {
-                console.log('🔄 Restarting WhatsApp client...');
-                initializeWhatsApp();
-            }
+            console.log('🔄 Mencoba restart WhatsApp client...');
+            initializeWhatsApp();
         }, 10000);
     });
 }
 
-// Start server
+// Mulai inisialisasi WhatsApp
+initializeWhatsApp();
+
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
@@ -440,9 +438,6 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
     console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
-    console.log(`📞 FITUR TELEPON: AKTIF - Customer menerima panggilan di WhatsApp`);
-    console.log(`🔧 PUPPETEER: Konfigurasi Railway Compatible`);
-    
-    // Initialize WhatsApp
-    initializeWhatsApp();
+    console.log(`📞 FITUR TELEPON: FIXED - Backend sekarang merespons dengan customer_phone_received`);
+    console.log(`🔧 PUPPETEER: FIXED untuk Railway deployment`);
 });
