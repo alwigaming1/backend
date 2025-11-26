@@ -1,15 +1,16 @@
-// server.js - FIXED EVENT HANDLER PROBLEM
+// server.js - OPTIMIZED FOR RAILWAY DEPLOYMENT
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
-const FRONTEND_URL = "https://pasarkilat-app.vercel.app";
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://pasarkilat-app.vercel.app";
 
 const io = new Server(server, {
     cors: {
@@ -18,6 +19,7 @@ const io = new Server(server, {
     }
 });
 
+app.use(cors());
 app.use(express.json());
 
 let whatsappStatus = 'disconnected';
@@ -28,7 +30,7 @@ const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
 
-// WhatsApp Client - FIXED FOR RAILWAY
+// WhatsApp Client - OPTIMIZED FOR RAILWAY
 const client = new Client({
     authStrategy: new LocalAuth({
         clientId: "courier-app",
@@ -41,12 +43,49 @@ const client = new Client({
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--no-first-run',
+            '--no-zygote',
             '--single-process',
             '--disable-gpu',
             '--disable-accelerated-2d-canvas',
-            '--disable-web-security'
+            '--disable-web-security',
+            '--disable-features=site-per-process',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-back-forward-cache',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-extensions',
+            '--disable-plugins',
+            '--disable-translate',
+            '--disable-sync',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-default-browser-check',
+            '--autoplay-policy=user-gesture-required',
+            '--disable-background-networking',
+            '--disable-client-side-phishing-detection',
+            '--disable-crash-reporter',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-prompt-on-repost',
+            '--disable-domain-reliability',
+            '--disable-partial-raster',
+            '--disable-skia-runtime-opts',
+            '--disable-breakpad',
+            '--disable-component-update',
+            '--disable-field-trial-config',
+            '--disable-software-rasterizer',
+            '--disable-webrtc-hw-decoding',
+            '--disable-webrtc-hw-encoding',
+            '--force-color-profile=srgb',
+            '--ignore-certificate-errors',
+            '--enable-features=NetworkService,NetworkServiceInProcess',
+            '--max-old-space-size=512'
         ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        ignoreDefaultArgs: ['--disable-extensions'],
+        timeout: 60000
     }
 });
 
@@ -415,8 +454,19 @@ app.get('/call-debug', (req, res) => {
     });
 });
 
+// Health check route
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        whatsapp: whatsappStatus,
+        uptime: process.uptime()
+    });
+});
+
 // Initialize WhatsApp
 function initializeWhatsApp() {
+    console.log('🚀 Initializing WhatsApp client...');
     client.initialize().catch(err => {
         console.error('❌ Gagal inisialisasi WhatsApp:', err.message);
         whatsappStatus = 'error';
@@ -437,6 +487,16 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
-    console.log(`💡 TELEPHONE FIX: Event handler dipisah dan di-setup ulang setiap koneksi`);
+    console.log(`💡 RAILWAY OPTIMIZED: Konfigurasi Puppeteer diperbarui`);
     console.log(`🔧 DEBUG: Logging ditingkatkan untuk troubleshooting`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('🛑 Shutting down gracefully...');
+    client.destroy();
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
 });
