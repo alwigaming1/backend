@@ -1,4 +1,4 @@
-// server.js - PERBAIKAN EVENT HANDLER TELEPON
+// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS AND CALL FUNCTIONALITY
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -27,6 +27,7 @@ let qrCodeData = null;
 const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
+const activeOrders = new Map(); // Menyimpan pesanan aktif
 
 // WhatsApp Client dengan konfigurasi Puppeteer yang diperbaiki
 const client = new Client({
@@ -180,12 +181,14 @@ const sampleJobs = [
 function initializeMappings() {
     customerMapping.clear();
     phoneToJobMapping.clear();
+    activeOrders.clear();
     
     // Mapping untuk sample jobs
     sampleJobs.forEach(job => {
         const cleanPhone = job.customerPhone.replace(/\D/g, '');
         customerMapping.set(job.id, cleanPhone);
         phoneToJobMapping.set(cleanPhone, job.id);
+        activeOrders.set(job.id, job);
     });
     
     console.log('🔄 Mapping initialized:', {
@@ -232,6 +235,62 @@ io.on('connection', (socket) => {
     });
 
     socket.emit('initial_jobs', sampleJobs);
+
+    // === HANDLE PESANAN BARU DARI ADMIN ===
+    socket.on('create_order', (orderData) => {
+        console.log('📦 Menerima pesanan baru dari admin:', orderData);
+        
+        try {
+            // Generate unique job ID jika belum ada
+            const jobId = orderData.id || 'ORD' + Date.now();
+            
+            // Buat job object yang lengkap
+            const newJob = {
+                id: jobId,
+                customerPhone: orderData.customer.phone,
+                customerName: orderData.customer.name,
+                status: 'new',
+                pickup: orderData.pickup,
+                delivery: orderData.delivery,
+                payment: orderData.payment,
+                distance: orderData.distance + ' km',
+                estimate: orderData.estimate + ' menit',
+                priority: orderData.priority || 'standard',
+                createdAt: new Date(),
+                customer: orderData.customer
+            };
+
+            // Simpan ke active orders
+            activeOrders.set(jobId, newJob);
+            
+            // Buat mapping untuk WhatsApp
+            const cleanPhone = newJob.customerPhone.replace(/\D/g, '');
+            customerMapping.set(jobId, cleanPhone);
+            phoneToJobMapping.set(cleanPhone, jobId);
+            
+            console.log(`✅ Pesanan baru berhasil dibuat: ${jobId}`);
+            
+            // Kirim konfirmasi ke admin
+            socket.emit('order_created', { 
+                success: true, 
+                jobId: jobId,
+                order: newJob
+            });
+            
+            // Broadcast ke semua kurir tentang pesanan baru
+            io.emit('new_job_available', newJob);
+            io.emit('order_created_broadcast', newJob);
+            
+            console.log(`📢 Pesanan ${jobId} dikirim ke semua kurir`);
+            
+        } catch (error) {
+            console.error('❌ Error membuat pesanan:', error);
+            socket.emit('order_created', { 
+                success: false, 
+                error: error.message 
+            });
+        }
+    });
 
     // === KIRIM PESAN KE CUSTOMER ===
     socket.on('send_message', async (data) => {
@@ -315,28 +374,68 @@ io.on('connection', (socket) => {
     socket.on('job_accepted', async (data) => {
         console.log('✅ Job accepted:', data.jobId);
         
+        // Update status pesanan
+        const job = activeOrders.get(data.jobId);
+        if (job) {
+            job.status = 'processing';
+            job.acceptedAt = new Date();
+            job.courierId = data.courierId;
+            
+            // Broadcast update status
+            io.emit('job_accepted_broadcast', data);
+            io.emit('order_updated', job);
+        }
+        
         // Buat mapping untuk job yang diterima (jika belum ada)
         getOrCreateCustomerPhone(data.jobId);
         
         socket.emit('job_accepted_success', data);
     });
 
-    // === PERBAIKAN: HANDLE REQUEST TELEPON DARI CLIENT ===
-    socket.on('request_customer_phone', (data) => {
-        console.log('📞 [SERVER] Request telepon customer untuk job:', data.jobId);
+    // === HANDLE REQUEST TELEPON KE CUSTOMER ===
+    socket.on('request_call_customer', async (data) => {
+        console.log('📞 Request telepon ke customer:', data);
+        
+        const jobId = data.jobId;
+        
+        // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
+        const customerPhone = getOrCreateCustomerPhone(jobId);
+        
+        if (!customerPhone) {
+            console.error('❌ Tidak bisa menemukan customer untuk job:', jobId);
+            socket.emit('call_status', { 
+                success: false, 
+                error: 'Tidak dapat menemukan nomor customer untuk job ini' 
+            });
+            return;
+        }
+
+        console.log(`📞 Mengirim nomor telepon customer: ${customerPhone} untuk job: ${jobId}`);
+        
+        // Kirim nomor customer ke frontend
+        socket.emit('customer_phone_received', { 
+            success: true,
+            jobId: jobId,
+            phone: customerPhone,
+            message: 'Nomor customer berhasil didapatkan'
+        });
+    });
+
+    // === HANDLE REQUEST NOMOR CUSTOMER ===
+    socket.on('get_customer_phone', (data) => {
+        console.log('📱 Request nomor customer untuk job:', data.jobId);
         
         const customerPhone = getOrCreateCustomerPhone(data.jobId);
         
         if (customerPhone) {
-            console.log(`✅ [SERVER] Mengirim nomor customer: ${customerPhone} untuk job: ${data.jobId}`);
+            console.log(`✅ Mengirim nomor customer: ${customerPhone}`);
             socket.emit('customer_phone_received', { 
                 success: true,
                 jobId: data.jobId,
-                phone: customerPhone,
-                message: 'Nomor customer berhasil didapatkan'
+                phone: customerPhone
             });
         } else {
-            console.error('❌ [SERVER] Nomor customer tidak ditemukan untuk job:', data.jobId);
+            console.error('❌ Nomor customer tidak ditemukan untuk job:', data.jobId);
             socket.emit('customer_phone_received', { 
                 success: false, 
                 error: 'Nomor customer tidak ditemukan' 
@@ -344,33 +443,26 @@ io.on('connection', (socket) => {
         }
     });
 
-    // === HANDLE REQUEST CALL CUSTOMER ===
-    socket.on('request_call_customer', (data) => {
-        console.log('📞 [SERVER] Request call customer untuk job:', data.jobId);
+    // === HANDLE JOB COMPLETED ===
+    socket.on('job_completed', (data) => {
+        console.log('🎊 Job completed:', data.jobId);
         
-        const customerPhone = getOrCreateCustomerPhone(data.jobId);
-        
-        if (customerPhone) {
-            console.log(`✅ [SERVER] Mengirim nomor untuk panggilan: ${customerPhone}`);
-            socket.emit('customer_phone_received', { 
-                success: true,
-                jobId: data.jobId,
-                phone: customerPhone,
-                message: 'Nomor customer berhasil didapatkan'
-            });
-        } else {
-            console.error('❌ [SERVER] Nomor customer tidak ditemukan untuk panggilan:', data.jobId);
-            socket.emit('customer_phone_received', { 
-                success: false, 
-                error: 'Nomor customer tidak ditemukan' 
-            });
+        // Update status pesanan
+        const job = activeOrders.get(data.jobId);
+        if (job) {
+            job.status = 'completed';
+            job.completedAt = new Date();
+            
+            // Broadcast update status
+            io.emit('job_completed_broadcast', data);
+            io.emit('order_updated', job);
         }
     });
 
     // === DEBUG: LOG SEMUA EVENT ===
     socket.onAny((eventName, ...args) => {
         if (!eventName.includes('ping') && !eventName.includes('pong')) {
-            console.log(`🔍 [SERVER] Socket Event: ${eventName}`, args);
+            console.log(`🔍 Socket Event: ${eventName}`, args);
         }
     });
 
@@ -385,6 +477,7 @@ app.get('/', (req, res) => {
         status: 'Server Running', 
         whatsapp_status: whatsappStatus,
         active_chats: chatSessions.size,
+        active_orders: activeOrders.size,
         mappings: {
             customerMapping: Array.from(customerMapping.entries()),
             phoneToJobMapping: Array.from(phoneToJobMapping.entries())
@@ -398,6 +491,7 @@ app.get('/debug', (req, res) => {
         whatsappStatus,
         customerMapping: Array.from(customerMapping.entries()),
         phoneToJobMapping: Array.from(phoneToJobMapping.entries()),
+        activeOrders: Array.from(activeOrders.entries()),
         chatSessions: Array.from(chatSessions.entries()).map(([jobId, messages]) => ({
             jobId,
             messageCount: messages.length
@@ -429,6 +523,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
+    console.log(`📦 Active Orders: ${activeOrders.size} pesanan`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
     console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
     
