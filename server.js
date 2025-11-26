@@ -1,4 +1,4 @@
-// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS AND CALL FUNCTIONALITY
+// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS AND REGULAR CALL FUNCTIONALITY
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
