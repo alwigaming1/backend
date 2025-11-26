@@ -1,4 +1,4 @@
-// server.js - FIXED TELEPHONE RESPONSE with better logging
+// server.js - FIXED TELEPHONE RESPONSE
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -184,12 +184,9 @@ function initializeMappings() {
 
 // Fungsi untuk membuat mapping otomatis untuk job simulasi
 function createSimulatedJobMapping(jobId) {
-    console.log(`🔍 [createSimulatedJobMapping] Creating mapping for ${jobId}`);
     // Pilih nomor acak dari TEST_PHONES untuk job simulasi
     const randomPhone = TEST_PHONES[Math.floor(Math.random() * TEST_PHONES.length)];
-    console.log(`🔍 [createSimulatedJobMapping] Random phone selected: ${randomPhone}`);
     const cleanPhone = randomPhone.replace(/\D/g, '');
-    console.log(`🔍 [createSimulatedJobMapping] Clean phone: ${cleanPhone}`);
     
     customerMapping.set(jobId, cleanPhone);
     phoneToJobMapping.set(cleanPhone, jobId);
@@ -202,10 +199,9 @@ function createSimulatedJobMapping(jobId) {
 // Fungsi untuk mendapatkan atau membuat mapping untuk job
 function getOrCreateCustomerPhone(jobId) {
     let customerPhone = customerMapping.get(jobId);
-    console.log(`🔍 [getOrCreateCustomerPhone] customerPhone for ${jobId}:`, customerPhone);
     
-    if (!customerPhone && jobId.startsWith('SIM')) {
-        console.log(`🔍 [getOrCreateCustomerPhone] Creating new mapping for ${jobId}`);
+    if (!customerPhone) {
+        // Buat mapping otomatis untuk SEMUA job yang tidak ada mappingnya
         customerPhone = createSimulatedJobMapping(jobId);
     }
     
@@ -227,43 +223,32 @@ io.on('connection', (socket) => {
 
     // === HANDLE REQUEST NOMOR CUSTOMER UNTUK TELEPON - FIXED ===
     socket.on('request_customer_phone', (data) => {
+        console.log('📞 [BACKEND] Received request_customer_phone:', data);
+        
+        if (!data || !data.jobId) {
+            console.log('❌ [BACKEND] Invalid data received:', data);
+            socket.emit('customer_phone_received', {
+                success: false,
+                error: 'Data tidak valid'
+            });
+            return;
+        }
+
+        const jobId = data.jobId;
+        console.log('🔍 [BACKEND] Looking for phone mapping for job:', jobId);
+        
         try {
-            console.log('📞 [BACKEND] Received request_customer_phone:', data);
-            
-            if (!data || !data.jobId) {
-                console.log('❌ [BACKEND] Invalid data received:', data);
-                socket.emit('customer_phone_received', {
-                    success: false,
-                    error: 'Data tidak valid'
-                });
-                return;
-            }
-
-            const jobId = data.jobId;
-            console.log('🔍 [BACKEND] Looking for phone mapping for job:', jobId);
-            console.log('🔍 [BACKEND] JobId type:', typeof jobId);
-            console.log('🔍 [BACKEND] JobId starts with SIM:', jobId.startsWith('SIM'));
-            
-            // Debug: log semua mapping yang ada
-            console.log('📋 [BACKEND] Current customer mappings:', Array.from(customerMapping.entries()));
-
-            // Cari nomor customer berdasarkan jobId
-            let customerPhone = customerMapping.get(jobId);
-            
-            if (!customerPhone) {
-                console.log('🔄 [BACKEND] No mapping found, creating new one for:', jobId);
-                customerPhone = getOrCreateCustomerPhone(jobId);
-                console.log('✅ [BACKEND] After getOrCreateCustomerPhone:', customerPhone);
-            }
+            // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
+            const customerPhone = getOrCreateCustomerPhone(jobId);
             
             if (customerPhone) {
-                console.log('✅ [BACKEND] Phone found:', customerPhone);
+                console.log('✅ [BACKEND] Phone found/created:', customerPhone);
                 
                 // Pastikan format nomor benar
                 const cleanPhone = customerPhone.replace(/\D/g, '');
                 console.log('🔧 [BACKEND] Clean phone number:', cleanPhone);
                 
-                // FIX: Kirim response ke client yang meminta
+                // KIRIM RESPONSE KE CLIENT YANG MEMINTA
                 socket.emit('customer_phone_received', {
                     success: true,
                     jobId: jobId,
@@ -285,7 +270,8 @@ io.on('connection', (socket) => {
             console.error('❌ [BACKEND] Error in request_customer_phone:', error);
             socket.emit('customer_phone_received', {
                 success: false,
-                error: 'Terjadi kesalahan internal'
+                jobId: jobId,
+                error: 'Terjadi kesalahan sistem'
             });
         }
     });
@@ -451,7 +437,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
-    console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
-    console.log(`📞 FITUR TELEPON: FIXED - Backend sekarang merespons dengan customer_phone_received`);
+    console.log(`💡 AUTO-MAPPING: AKTIF untuk SEMUA job yang tidak ada mappingnya`);
+    console.log(`📞 FITUR TELEPON: FIXED - Backend sekarang selalu merespons dengan customer_phone_received`);
     console.log(`🔧 PUPPETEER: FIXED untuk Railway deployment`);
 });
