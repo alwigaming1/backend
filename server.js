@@ -1,4 +1,4 @@
-// server.js - FIXED TELEPHONE RESPONSE
+// server.js - FIXED TELEPHONE RESPONSE with better logging
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -184,9 +184,12 @@ function initializeMappings() {
 
 // Fungsi untuk membuat mapping otomatis untuk job simulasi
 function createSimulatedJobMapping(jobId) {
+    console.log(`🔍 [createSimulatedJobMapping] Creating mapping for ${jobId}`);
     // Pilih nomor acak dari TEST_PHONES untuk job simulasi
     const randomPhone = TEST_PHONES[Math.floor(Math.random() * TEST_PHONES.length)];
+    console.log(`🔍 [createSimulatedJobMapping] Random phone selected: ${randomPhone}`);
     const cleanPhone = randomPhone.replace(/\D/g, '');
+    console.log(`🔍 [createSimulatedJobMapping] Clean phone: ${cleanPhone}`);
     
     customerMapping.set(jobId, cleanPhone);
     phoneToJobMapping.set(cleanPhone, jobId);
@@ -199,9 +202,10 @@ function createSimulatedJobMapping(jobId) {
 // Fungsi untuk mendapatkan atau membuat mapping untuk job
 function getOrCreateCustomerPhone(jobId) {
     let customerPhone = customerMapping.get(jobId);
+    console.log(`🔍 [getOrCreateCustomerPhone] customerPhone for ${jobId}:`, customerPhone);
     
     if (!customerPhone && jobId.startsWith('SIM')) {
-        // Buat mapping otomatis untuk job simulasi
+        console.log(`🔍 [getOrCreateCustomerPhone] Creating new mapping for ${jobId}`);
         customerPhone = createSimulatedJobMapping(jobId);
     }
     
@@ -223,55 +227,65 @@ io.on('connection', (socket) => {
 
     // === HANDLE REQUEST NOMOR CUSTOMER UNTUK TELEPON - FIXED ===
     socket.on('request_customer_phone', (data) => {
-        console.log('📞 [BACKEND] Received request_customer_phone:', data);
-        
-        if (!data || !data.jobId) {
-            console.log('❌ [BACKEND] Invalid data received:', data);
+        try {
+            console.log('📞 [BACKEND] Received request_customer_phone:', data);
+            
+            if (!data || !data.jobId) {
+                console.log('❌ [BACKEND] Invalid data received:', data);
+                socket.emit('customer_phone_received', {
+                    success: false,
+                    error: 'Data tidak valid'
+                });
+                return;
+            }
+
+            const jobId = data.jobId;
+            console.log('🔍 [BACKEND] Looking for phone mapping for job:', jobId);
+            console.log('🔍 [BACKEND] JobId type:', typeof jobId);
+            console.log('🔍 [BACKEND] JobId starts with SIM:', jobId.startsWith('SIM'));
+            
+            // Debug: log semua mapping yang ada
+            console.log('📋 [BACKEND] Current customer mappings:', Array.from(customerMapping.entries()));
+
+            // Cari nomor customer berdasarkan jobId
+            let customerPhone = customerMapping.get(jobId);
+            
+            if (!customerPhone) {
+                console.log('🔄 [BACKEND] No mapping found, creating new one for:', jobId);
+                customerPhone = getOrCreateCustomerPhone(jobId);
+                console.log('✅ [BACKEND] After getOrCreateCustomerPhone:', customerPhone);
+            }
+            
+            if (customerPhone) {
+                console.log('✅ [BACKEND] Phone found:', customerPhone);
+                
+                // Pastikan format nomor benar
+                const cleanPhone = customerPhone.replace(/\D/g, '');
+                console.log('🔧 [BACKEND] Clean phone number:', cleanPhone);
+                
+                // FIX: Kirim response ke client yang meminta
+                socket.emit('customer_phone_received', {
+                    success: true,
+                    jobId: jobId,
+                    phone: cleanPhone
+                });
+                
+                console.log('📤 [BACKEND] Sent customer_phone_received event to client:', socket.id);
+                
+            } else {
+                console.log('❌ [BACKEND] No phone number available for job:', jobId);
+                
+                socket.emit('customer_phone_received', {
+                    success: false,
+                    jobId: jobId,
+                    error: 'Nomor customer tidak tersedia'
+                });
+            }
+        } catch (error) {
+            console.error('❌ [BACKEND] Error in request_customer_phone:', error);
             socket.emit('customer_phone_received', {
                 success: false,
-                error: 'Data tidak valid'
-            });
-            return;
-        }
-
-        const jobId = data.jobId;
-        console.log('🔍 [BACKEND] Looking for phone mapping for job:', jobId);
-        
-        // Debug: log semua mapping yang ada
-        console.log('📋 [BACKEND] Current customer mappings:', Array.from(customerMapping.entries()));
-
-        // Cari nomor customer berdasarkan jobId
-        let customerPhone = customerMapping.get(jobId);
-        
-        if (!customerPhone) {
-            console.log('🔄 [BACKEND] No mapping found, creating new one for:', jobId);
-            customerPhone = getOrCreateCustomerPhone(jobId);
-            console.log('✅ [BACKEND] New mapping created:', customerPhone);
-        }
-        
-        if (customerPhone) {
-            console.log('✅ [BACKEND] Phone found:', customerPhone);
-            
-            // Pastikan format nomor benar
-            const cleanPhone = customerPhone.replace(/\D/g, '');
-            console.log('🔧 [BACKEND] Clean phone number:', cleanPhone);
-            
-            // FIX: Kirim response ke client yang meminta
-            socket.emit('customer_phone_received', {
-                success: true,
-                jobId: jobId,
-                phone: cleanPhone
-            });
-            
-            console.log('📤 [BACKEND] Sent customer_phone_received event to client:', socket.id);
-            
-        } else {
-            console.log('❌ [BACKEND] No phone number available for job:', jobId);
-            
-            socket.emit('customer_phone_received', {
-                success: false,
-                jobId: jobId,
-                error: 'Nomor customer tidak tersedia'
+                error: 'Terjadi kesalahan internal'
             });
         }
     });
