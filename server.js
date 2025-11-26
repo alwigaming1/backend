@@ -1,4 +1,4 @@
-// server.js - FIXED TELEPHONE RESPONSE
+// server.js - FIXED EVENT HANDLER PROBLEM
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -210,20 +210,16 @@ function getOrCreateCustomerPhone(jobId) {
 
 initializeMappings();
 
-// === TELEPHONE HANDLERS - FIXED ===
-io.on('connection', (socket) => {
-    console.log('✅ Client connected:', socket.id);
+// === FIXED TELEPHONE HANDLER - NEW APPROACH ===
+function setupTelephoneHandler(socket) {
+    console.log('🔧 Setting up telephone handler for socket:', socket.id);
     
-    socket.emit('whatsapp_status', { 
-        status: whatsappStatus, 
-        qr: qrCodeData 
-    });
-
-    socket.emit('initial_jobs', sampleJobs);
-
-    // === HANDLE REQUEST NOMOR CUSTOMER UNTUK TELEPON - FIXED ===
+    // Hapus event listener lama jika ada
+    socket.removeAllListeners('request_customer_phone');
+    
+    // Setup event listener baru
     socket.on('request_customer_phone', (data) => {
-        console.log('📞 [BACKEND] Received request_customer_phone:', data);
+        console.log('📞 [BACKEND] request_customer_phone EVENT TRIGGERED!', data);
         
         if (!data || !data.jobId) {
             console.log('❌ [BACKEND] Invalid data received:', data);
@@ -235,7 +231,7 @@ io.on('connection', (socket) => {
         }
 
         const jobId = data.jobId;
-        console.log('🔍 [BACKEND] Looking for phone mapping for job:', jobId);
+        console.log('🔍 [BACKEND] Processing phone request for job:', jobId);
         
         try {
             // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
@@ -249,13 +245,15 @@ io.on('connection', (socket) => {
                 console.log('🔧 [BACKEND] Clean phone number:', cleanPhone);
                 
                 // KIRIM RESPONSE KE CLIENT YANG MEMINTA
-                socket.emit('customer_phone_received', {
+                const responseData = {
                     success: true,
                     jobId: jobId,
                     phone: cleanPhone
-                });
+                };
                 
-                console.log('📤 [BACKEND] Sent customer_phone_received event to client:', socket.id);
+                console.log('📤 [BACKEND] Emitting customer_phone_received:', responseData);
+                socket.emit('customer_phone_received', responseData);
+                console.log('✅ [BACKEND] customer_phone_received event sent to client:', socket.id);
                 
             } else {
                 console.log('❌ [BACKEND] No phone number available for job:', jobId);
@@ -271,24 +269,35 @@ io.on('connection', (socket) => {
             socket.emit('customer_phone_received', {
                 success: false,
                 jobId: jobId,
-                error: 'Terjadi kesalahan sistem'
+                error: 'Terjadi kesalahan sistem: ' + error.message
             });
         }
     });
+}
 
-    socket.on('call_log', (data) => {
-        console.log('📞 Log panggilan:', data);
-        // Simpan log panggilan ke database atau console
+// === SOCKET.IO CONNECTION HANDLER ===
+io.on('connection', (socket) => {
+    console.log('✅ Client connected:', socket.id);
+    
+    // Kirim status awal
+    socket.emit('whatsapp_status', { 
+        status: whatsappStatus, 
+        qr: qrCodeData 
     });
 
-    // === KIRIM PESAN KE CUSTOMER ===
+    socket.emit('initial_jobs', sampleJobs);
+
+    // Setup telephone handler
+    setupTelephoneHandler(socket);
+
+    // === OTHER EVENT HANDLERS ===
+    socket.on('call_log', (data) => {
+        console.log('📞 Log panggilan:', data);
+    });
+
     socket.on('send_message', async (data) => {
-        console.log('💬 Kurir mengirim pesan:', {
-            jobId: data.jobId,
-            message: data.message
-        });
+        console.log('💬 Kurir mengirim pesan:', data);
         
-        // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
         const customerPhone = getOrCreateCustomerPhone(data.jobId);
         
         if (!customerPhone) {
@@ -310,13 +319,11 @@ io.on('connection', (socket) => {
         }
 
         try {
-            // Kirim pesan ke customer via WhatsApp
             const customerNumber = `${customerPhone}@c.us`;
             console.log('📤 Mengirim ke:', customerNumber);
             
             await client.sendMessage(customerNumber, data.message);
             
-            // Simpan pesan di history chat
             if (!chatSessions.has(data.jobId)) {
                 chatSessions.set(data.jobId, []);
             }
@@ -331,7 +338,6 @@ io.on('connection', (socket) => {
             
             chatSessions.get(data.jobId).push(messageData);
             
-            // Kirim konfirmasi ke SEMUA client
             io.emit('message_sent', { 
                 success: true,
                 jobId: data.jobId,
@@ -349,7 +355,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // === MENDAPATKAN HISTORY CHAT ===
     socket.on('get_chat_history', (data) => {
         console.log('📂 Diminta history chat untuk job:', data.jobId);
         const history = chatSessions.get(data.jobId) || [];
@@ -359,13 +364,9 @@ io.on('connection', (socket) => {
         });
     });
 
-    // === HANDLE JOB ACCEPTED (UNTUK SIMULASI) ===
     socket.on('job_accepted', async (data) => {
         console.log('✅ Job accepted:', data.jobId);
-        
-        // Buat mapping untuk job yang diterima (jika belum ada)
         getOrCreateCustomerPhone(data.jobId);
-        
         socket.emit('job_accepted_success', data);
     });
 
@@ -414,13 +415,12 @@ app.get('/call-debug', (req, res) => {
     });
 });
 
-// Initialize WhatsApp dengan error handling yang lebih baik
+// Initialize WhatsApp
 function initializeWhatsApp() {
     client.initialize().catch(err => {
         console.error('❌ Gagal inisialisasi WhatsApp:', err.message);
         whatsappStatus = 'error';
         
-        // Coba restart setelah 10 detik
         setTimeout(() => {
             console.log('🔄 Mencoba restart WhatsApp client...');
             initializeWhatsApp();
@@ -437,7 +437,6 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
-    console.log(`💡 AUTO-MAPPING: AKTIF untuk SEMUA job yang tidak ada mappingnya`);
-    console.log(`📞 FITUR TELEPON: FIXED - Backend sekarang selalu merespons dengan customer_phone_received`);
-    console.log(`🔧 PUPPETEER: FIXED untuk Railway deployment`);
+    console.log(`💡 TELEPHONE FIX: Event handler dipisah dan di-setup ulang setiap koneksi`);
+    console.log(`🔧 DEBUG: Logging ditingkatkan untuk troubleshooting`);
 });
