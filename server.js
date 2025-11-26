@@ -1,4 +1,4 @@
-// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS DAN FITUR TELEPON
+// server.js - FIXED WITH PUPPETEER COMPATIBILITY FOR RAILWAY
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -28,7 +28,7 @@ const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
 
-// WhatsApp Client
+// WhatsApp Client - FIXED PUPPETEER CONFIG FOR RAILWAY
 const client = new Client({
     authStrategy: new LocalAuth({
         clientId: "courier-app",
@@ -42,8 +42,13 @@ const client = new Client({
             '--disable-dev-shm-usage',
             '--no-first-run',
             '--single-process',
-            '--disable-gpu'
-        ]
+            '--disable-gpu',
+            '--disable-accelerated-2d-canvas',
+            '--disable-web-security',
+            '--disable-features=site-per-process',
+            '--window-size=1920,1080'
+        ],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
     }
 });
 
@@ -132,8 +137,8 @@ client.on('message', async (msg) => {
 // === SAMPLE DATA DENGAN NOMOR TESTING ===
 // ⚠️ GANTI NOMOR-NOMOR INI DENGAN NOMOR WA ANDA UNTUK TESTING!
 const TEST_PHONES = [
-    '6281234567890',  // Ganti dengan nomor WA Anda
-    '6289876543210'   // Ganti dengan nomor WA lain
+    '6282195036971',  // Ganti dengan nomor WA Anda
+    '6282195036971'   // Ganti dengan nomor WA lain
 ];
 
 const sampleJobs = [
@@ -410,12 +415,24 @@ app.get('/call-debug', (req, res) => {
     });
 });
 
-// Initialize WhatsApp
-client.initialize().catch(err => {
-    console.error('❌ Gagal inisialisasi WhatsApp:', err);
-    whatsappStatus = 'error';
-});
+// Initialize WhatsApp dengan error handling yang lebih baik
+function initializeWhatsApp() {
+    client.initialize().catch(err => {
+        console.error('❌ Gagal inisialisasi WhatsApp:', err.message);
+        whatsappStatus = 'error';
+        
+        // Coba restart setelah 10 detik
+        console.log('🔄 Mencoba restart dalam 10 detik...');
+        setTimeout(() => {
+            if (whatsappStatus !== 'connected') {
+                console.log('🔄 Restarting WhatsApp client...');
+                initializeWhatsApp();
+            }
+        }, 10000);
+    });
+}
 
+// Start server
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
@@ -424,4 +441,8 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
     console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
     console.log(`📞 FITUR TELEPON: AKTIF - Customer menerima panggilan di WhatsApp`);
+    console.log(`🔧 PUPPETEER: Konfigurasi Railway Compatible`);
+    
+    // Initialize WhatsApp
+    initializeWhatsApp();
 });
