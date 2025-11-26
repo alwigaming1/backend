@@ -1,4 +1,4 @@
-// server.js - FIXED PUPPETEER CONFIG FOR RAILWAY
+// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS AND CALL FUNCTIONALITY
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -50,7 +50,7 @@ const client = new Client({
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding'
         ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null // Biarkan null untuk menggunakan Chromium bawaan
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
     }
 });
 
@@ -319,6 +319,57 @@ io.on('connection', (socket) => {
         getOrCreateCustomerPhone(data.jobId);
         
         socket.emit('job_accepted_success', data);
+    });
+
+    // === HANDLE REQUEST TELEPON KE CUSTOMER ===
+    socket.on('request_call_customer', async (data) => {
+        console.log('📞 Request telepon ke customer:', data);
+        
+        const jobId = data.jobId;
+        
+        // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
+        const customerPhone = getOrCreateCustomerPhone(jobId);
+        
+        if (!customerPhone) {
+            console.error('❌ Tidak bisa menemukan customer untuk job:', jobId);
+            socket.emit('call_status', { 
+                success: false, 
+                error: 'Tidak dapat menemukan nomor customer untuk job ini' 
+            });
+            return;
+        }
+
+        console.log(`📞 Mengirim nomor telepon customer: ${customerPhone} untuk job: ${jobId}`);
+        
+        // Kirim nomor customer ke frontend
+        socket.emit('customer_phone_received', { 
+            success: true,
+            jobId: jobId,
+            phone: customerPhone,
+            message: 'Nomor customer berhasil didapatkan'
+        });
+    });
+
+    // === HANDLE REQUEST NOMOR CUSTOMER ===
+    socket.on('get_customer_phone', (data) => {
+        console.log('📱 Request nomor customer untuk job:', data.jobId);
+        
+        const customerPhone = getOrCreateCustomerPhone(data.jobId);
+        
+        if (customerPhone) {
+            console.log(`✅ Mengirim nomor customer: ${customerPhone}`);
+            socket.emit('customer_phone_received', { 
+                success: true,
+                jobId: data.jobId,
+                phone: customerPhone
+            });
+        } else {
+            console.error('❌ Nomor customer tidak ditemukan untuk job:', data.jobId);
+            socket.emit('customer_phone_received', { 
+                success: false, 
+                error: 'Nomor customer tidak ditemukan' 
+            });
+        }
     });
 
     // === DEBUG: LOG SEMUA EVENT ===
