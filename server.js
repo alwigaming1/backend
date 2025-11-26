@@ -1,4 +1,4 @@
-// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS AND REGULAR CALL FUNCTIONALITY
+// server.js - PERBAIKAN EVENT HANDLER TELEPON
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -321,50 +321,45 @@ io.on('connection', (socket) => {
         socket.emit('job_accepted_success', data);
     });
 
-    // === HANDLE REQUEST TELEPON KE CUSTOMER ===
-    socket.on('request_call_customer', async (data) => {
-        console.log('📞 Request telepon ke customer:', data);
-        
-        const jobId = data.jobId;
-        
-        // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
-        const customerPhone = getOrCreateCustomerPhone(jobId);
-        
-        if (!customerPhone) {
-            console.error('❌ Tidak bisa menemukan customer untuk job:', jobId);
-            socket.emit('call_status', { 
-                success: false, 
-                error: 'Tidak dapat menemukan nomor customer untuk job ini' 
-            });
-            return;
-        }
-
-        console.log(`📞 Mengirim nomor telepon customer: ${customerPhone} untuk job: ${jobId}`);
-        
-        // Kirim nomor customer ke frontend
-        socket.emit('customer_phone_received', { 
-            success: true,
-            jobId: jobId,
-            phone: customerPhone,
-            message: 'Nomor customer berhasil didapatkan'
-        });
-    });
-
-    // === HANDLE REQUEST NOMOR CUSTOMER ===
-    socket.on('get_customer_phone', (data) => {
-        console.log('📱 Request nomor customer untuk job:', data.jobId);
+    // === PERBAIKAN: HANDLE REQUEST TELEPON DARI CLIENT ===
+    socket.on('request_customer_phone', (data) => {
+        console.log('📞 [SERVER] Request telepon customer untuk job:', data.jobId);
         
         const customerPhone = getOrCreateCustomerPhone(data.jobId);
         
         if (customerPhone) {
-            console.log(`✅ Mengirim nomor customer: ${customerPhone}`);
+            console.log(`✅ [SERVER] Mengirim nomor customer: ${customerPhone} untuk job: ${data.jobId}`);
             socket.emit('customer_phone_received', { 
                 success: true,
                 jobId: data.jobId,
-                phone: customerPhone
+                phone: customerPhone,
+                message: 'Nomor customer berhasil didapatkan'
             });
         } else {
-            console.error('❌ Nomor customer tidak ditemukan untuk job:', data.jobId);
+            console.error('❌ [SERVER] Nomor customer tidak ditemukan untuk job:', data.jobId);
+            socket.emit('customer_phone_received', { 
+                success: false, 
+                error: 'Nomor customer tidak ditemukan' 
+            });
+        }
+    });
+
+    // === HANDLE REQUEST CALL CUSTOMER ===
+    socket.on('request_call_customer', (data) => {
+        console.log('📞 [SERVER] Request call customer untuk job:', data.jobId);
+        
+        const customerPhone = getOrCreateCustomerPhone(data.jobId);
+        
+        if (customerPhone) {
+            console.log(`✅ [SERVER] Mengirim nomor untuk panggilan: ${customerPhone}`);
+            socket.emit('customer_phone_received', { 
+                success: true,
+                jobId: data.jobId,
+                phone: customerPhone,
+                message: 'Nomor customer berhasil didapatkan'
+            });
+        } else {
+            console.error('❌ [SERVER] Nomor customer tidak ditemukan untuk panggilan:', data.jobId);
             socket.emit('customer_phone_received', { 
                 success: false, 
                 error: 'Nomor customer tidak ditemukan' 
@@ -375,7 +370,7 @@ io.on('connection', (socket) => {
     // === DEBUG: LOG SEMUA EVENT ===
     socket.onAny((eventName, ...args) => {
         if (!eventName.includes('ping') && !eventName.includes('pong')) {
-            console.log(`🔍 Socket Event: ${eventName}`, args);
+            console.log(`🔍 [SERVER] Socket Event: ${eventName}`, args);
         }
     });
 
