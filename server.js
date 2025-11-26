@@ -1,4 +1,4 @@
-// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS AND CALL FUNCTIONALITY
+// server.js - FIXED CORS AND ORDER MANAGEMENT
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -9,16 +9,25 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://pasarkilat-app.vercel.app";
 
+// === PERBAIKAN CORS UNTUK SEMUA ORIGIN ===
 const io = new Server(server, {
     cors: {
-        origin: FRONTEND_URL,
-        methods: ["GET", "POST"]
+        origin: "*", // Izinkan semua origin untuk development
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
 app.use(express.json());
+
+// Middleware untuk handle CORS di HTTP routes
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    next();
+});
 
 let whatsappStatus = 'disconnected';
 let qrCodeData = null;
@@ -520,7 +529,6 @@ async function initializeWhatsApp() {
 // Start server
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
-    console.log(`🔗 Frontend: ${FRONTEND_URL}`);
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📦 Active Orders: ${activeOrders.size} pesanan`);
