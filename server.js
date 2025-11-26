@@ -1,4 +1,4 @@
-// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS
+// server.js - FIXED PUPPETEER CONFIG FOR RAILWAY
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -9,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
-const FRONTEND_URL = "https://pasarkilat-app.vercel.app";
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://pasarkilat-app.vercel.app";
 
 const io = new Server(server, {
     cors: {
@@ -28,7 +28,7 @@ const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
 
-// WhatsApp Client
+// WhatsApp Client dengan konfigurasi Puppeteer yang diperbaiki
 const client = new Client({
     authStrategy: new LocalAuth({
         clientId: "courier-app",
@@ -40,10 +40,17 @@ const client = new Client({
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
             '--no-first-run',
-            '--single-process',
-            '--disable-gpu'
-        ]
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding'
+        ],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null // Biarkan null untuk menggunakan Chromium bawaan
     }
 });
 
@@ -71,6 +78,14 @@ client.on('disconnected', (reason) => {
     console.log('❌ WhatsApp Disconnected:', reason);
     whatsappStatus = 'disconnected';
     io.emit('whatsapp_status', { status: whatsappStatus });
+    
+    // Coba reconnect setelah 5 detik
+    setTimeout(() => {
+        console.log('🔄 Attempting to reconnect WhatsApp...');
+        client.initialize().catch(err => {
+            console.error('❌ Gagal reconnect WhatsApp:', err);
+        });
+    }, 5000);
 });
 
 // === HANDLE PESAN MASUK DARI CUSTOMER ===
@@ -130,7 +145,6 @@ client.on('message', async (msg) => {
 });
 
 // === SAMPLE DATA DENGAN NOMOR TESTING ===
-// ⚠️ GANTI NOMOR-NOMOR INI DENGAN NOMOR WA ANDA UNTUK TESTING!
 const TEST_PHONES = [
     '6282195036971',  // Ganti dengan nomor WA Anda
     '6282195036971',  // Ganti dengan nomor WA lain (atau sama)
@@ -309,7 +323,9 @@ io.on('connection', (socket) => {
 
     // === DEBUG: LOG SEMUA EVENT ===
     socket.onAny((eventName, ...args) => {
-        console.log(`🔍 Socket Event: ${eventName}`, args);
+        if (!eventName.includes('ping') && !eventName.includes('pong')) {
+            console.log(`🔍 Socket Event: ${eventName}`, args);
+        }
     });
 
     socket.on('disconnect', () => {
@@ -343,12 +359,25 @@ app.get('/debug', (req, res) => {
     });
 });
 
-// Initialize WhatsApp
-client.initialize().catch(err => {
-    console.error('❌ Gagal inisialisasi WhatsApp:', err);
-    whatsappStatus = 'error';
-});
+// Initialize WhatsApp dengan error handling yang lebih baik
+async function initializeWhatsApp() {
+    try {
+        console.log('🔄 Starting WhatsApp initialization...');
+        await client.initialize();
+        console.log('✅ WhatsApp initialization completed');
+    } catch (err) {
+        console.error('❌ Gagal inisialisasi WhatsApp:', err);
+        whatsappStatus = 'error';
+        
+        // Coba lagi setelah 10 detik
+        setTimeout(() => {
+            console.log('🔄 Retrying WhatsApp initialization...');
+            initializeWhatsApp();
+        }, 10000);
+    }
+}
 
+// Start server
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
@@ -356,4 +385,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
     console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
     console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
+    
+    // Start WhatsApp initialization
+    initializeWhatsApp();
 });
