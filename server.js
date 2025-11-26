@@ -1,16 +1,15 @@
-// server.js - FIXED PUPPETEER VERSION
+// server.js - FIXED WITH AUTO-MAPPING FOR SIMULATED JOBS
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://pasarkilat-app.vercel.app";
+const FRONTEND_URL = "https://pasarkilat-app.vercel.app";
 
 const io = new Server(server, {
     cors: {
@@ -19,20 +18,17 @@ const io = new Server(server, {
     }
 });
 
-app.use(cors());
 app.use(express.json());
 
 let whatsappStatus = 'disconnected';
 let qrCodeData = null;
-let initializationAttempts = 0;
-const MAX_INIT_ATTEMPTS = 5;
 
 // === SISTEM MAPPING YANG DIPERBAIKI ===
 const customerMapping = new Map();
 const phoneToJobMapping = new Map();
 const chatSessions = new Map();
 
-// WhatsApp Client - EXTREMELY ROBUST CONFIG FOR RAILWAY
+// WhatsApp Client
 const client = new Client({
     authStrategy: new LocalAuth({
         clientId: "courier-app",
@@ -45,56 +41,9 @@ const client = new Client({
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--no-first-run',
-            '--no-zygote',
             '--single-process',
-            '--disable-gpu',
-            '--disable-accelerated-2d-canvas',
-            '--disable-web-security',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-features=AudioServiceOutOfProcess',
-            '--disable-back-forward-cache',
-            '--disable-component-extensions-with-background-pages',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-plugins',
-            '--disable-translate',
-            '--disable-sync',
-            '--metrics-recording-only',
-            '--mute-audio',
-            '--no-default-browser-check',
-            '--autoplay-policy=user-gesture-required',
-            '--disable-background-networking',
-            '--disable-client-side-phishing-detection',
-            '--disable-crash-reporter',
-            '--disable-hang-monitor',
-            '--disable-ipc-flooding-protection',
-            '--disable-prompt-on-repost',
-            '--disable-domain-reliability',
-            '--disable-partial-raster',
-            '--disable-skia-runtime-opts',
-            '--disable-breakpad',
-            '--disable-component-update',
-            '--disable-field-trial-config',
-            '--disable-software-rasterizer',
-            '--disable-webrtc-hw-decoding',
-            '--disable-webrtc-hw-encoding',
-            '--force-color-profile=srgb',
-            '--ignore-certificate-errors',
-            '--ignore-certificate-errors-spki-list',
-            '--enable-features=NetworkService,NetworkServiceInProcess',
-            '--max-old-space-size=256',
-            '--memory-pressure-off'
-        ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-        ignoreDefaultArgs: ['--disable-extensions', '--enable-automation'],
-        timeout: 0, // Non-timeout
-        ignoreHTTPSErrors: true
-    },
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
+            '--disable-gpu'
+        ]
     }
 });
 
@@ -105,7 +54,6 @@ client.on('qr', (qr) => {
     
     qrCodeData = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qr)}`;
     whatsappStatus = 'qr_received';
-    initializationAttempts = 0; // Reset attempts on QR received
     
     io.emit('whatsapp_status', { 
         status: whatsappStatus, 
@@ -116,7 +64,6 @@ client.on('qr', (qr) => {
 client.on('ready', () => {
     console.log('✅ WhatsApp Client is Ready!');
     whatsappStatus = 'connected';
-    initializationAttempts = 0; // Reset attempts on ready
     io.emit('whatsapp_status', { status: whatsappStatus });
 });
 
@@ -124,25 +71,6 @@ client.on('disconnected', (reason) => {
     console.log('❌ WhatsApp Disconnected:', reason);
     whatsappStatus = 'disconnected';
     io.emit('whatsapp_status', { status: whatsappStatus });
-    
-    // Auto-restart dengan delay yang semakin lama
-    const delay = Math.min(initializationAttempts * 5000, 30000);
-    console.log(`🔄 Restarting WhatsApp client in ${delay}ms...`);
-    setTimeout(() => {
-        initializeWhatsApp();
-    }, delay);
-});
-
-client.on('auth_failure', (msg) => {
-    console.log('❌ Auth Failure:', msg);
-    whatsappStatus = 'auth_failure';
-    io.emit('whatsapp_status', { status: whatsappStatus });
-});
-
-client.on('loading_screen', (percent, message) => {
-    console.log(`🔄 Loading Screen: ${percent}% - ${message}`);
-    whatsappStatus = 'loading';
-    io.emit('whatsapp_status', { status: whatsappStatus, percent, message });
 });
 
 // === HANDLE PESAN MASUK DARI CUSTOMER ===
@@ -152,11 +80,13 @@ client.on('message', async (msg) => {
     const customerPhone = msg.from.replace('@c.us', '');
     console.log('📨 Pesan masuk dari:', customerPhone, 'Isi:', msg.body);
     
+    // Cari jobId berdasarkan nomor customer
     const jobId = phoneToJobMapping.get(customerPhone);
     
     if (jobId) {
         console.log(`✅ Pesan dialihkan ke job: ${jobId}`);
         
+        // Simpan pesan ke history chat
         if (!chatSessions.has(jobId)) {
             chatSessions.set(jobId, []);
         }
@@ -171,6 +101,7 @@ client.on('message', async (msg) => {
         
         chatSessions.get(jobId).push(messageData);
         
+        // PERBAIKAN: Kirim ke SEMUA client yang terhubung dengan struktur yang benar
         io.emit('new_message', {
             jobId: jobId,
             message: messageData
@@ -181,6 +112,7 @@ client.on('message', async (msg) => {
     } else {
         console.log('❌ Pesan dari nomor tidak terdaftar:', customerPhone);
         
+        // Coba cari jobId dari pesan (jika customer menyebutkan ID job)
         const jobIdMatch = msg.body.match(/#(\w+)/);
         if (jobIdMatch) {
             const extractedJobId = jobIdMatch[1];
@@ -188,6 +120,7 @@ client.on('message', async (msg) => {
             phoneToJobMapping.set(customerPhone, extractedJobId);
             customerMapping.set(extractedJobId, customerPhone);
             
+            // Kirim notifikasi mapping berhasil
             io.emit('mapping_created', {
                 phone: customerPhone,
                 jobId: extractedJobId
@@ -196,10 +129,12 @@ client.on('message', async (msg) => {
     }
 });
 
-// === SAMPLE DATA ===
+// === SAMPLE DATA DENGAN NOMOR TESTING ===
+// ⚠️ GANTI NOMOR-NOMOR INI DENGAN NOMOR WA ANDA UNTUK TESTING!
 const TEST_PHONES = [
-    '6282195036971',
-    '6282195036971'
+    '6282195036971',  // Ganti dengan nomor WA Anda
+    '6282195036971',  // Ganti dengan nomor WA lain (atau sama)
+    '6282195036971'   // Ganti dengan nomor WA lain (atau sama)
 ];
 
 const sampleJobs = [
@@ -227,21 +162,27 @@ const sampleJobs = [
     }
 ];
 
-// === AUTO-MAPPING SYSTEM ===
+// === AUTO-MAPPING SYSTEM UNTUK JOB SIMULASI ===
 function initializeMappings() {
     customerMapping.clear();
     phoneToJobMapping.clear();
     
+    // Mapping untuk sample jobs
     sampleJobs.forEach(job => {
         const cleanPhone = job.customerPhone.replace(/\D/g, '');
         customerMapping.set(job.id, cleanPhone);
         phoneToJobMapping.set(cleanPhone, job.id);
     });
     
-    console.log('🔄 Mapping initialized');
+    console.log('🔄 Mapping initialized:', {
+        jobs: sampleJobs.length,
+        customerMapping: Array.from(customerMapping.entries())
+    });
 }
 
+// Fungsi untuk membuat mapping otomatis untuk job simulasi
 function createSimulatedJobMapping(jobId) {
+    // Pilih nomor acak dari TEST_PHONES untuk job simulasi
     const randomPhone = TEST_PHONES[Math.floor(Math.random() * TEST_PHONES.length)];
     const cleanPhone = randomPhone.replace(/\D/g, '');
     
@@ -253,10 +194,12 @@ function createSimulatedJobMapping(jobId) {
     return cleanPhone;
 }
 
+// Fungsi untuk mendapatkan atau membuat mapping untuk job
 function getOrCreateCustomerPhone(jobId) {
     let customerPhone = customerMapping.get(jobId);
     
-    if (!customerPhone) {
+    if (!customerPhone && jobId.startsWith('SIM')) {
+        // Buat mapping otomatis untuk job simulasi
         customerPhone = createSimulatedJobMapping(jobId);
     }
     
@@ -265,56 +208,7 @@ function getOrCreateCustomerPhone(jobId) {
 
 initializeMappings();
 
-// === TELEPHONE HANDLER ===
-function setupTelephoneHandler(socket) {
-    socket.removeAllListeners('request_customer_phone');
-    
-    socket.on('request_customer_phone', (data) => {
-        console.log('📞 Request customer phone for job:', data?.jobId);
-        
-        if (!data || !data.jobId) {
-            socket.emit('customer_phone_received', {
-                success: false,
-                error: 'Data tidak valid'
-            });
-            return;
-        }
-
-        const jobId = data.jobId;
-        
-        try {
-            const customerPhone = getOrCreateCustomerPhone(jobId);
-            
-            if (customerPhone) {
-                const cleanPhone = customerPhone.replace(/\D/g, '');
-                
-                const responseData = {
-                    success: true,
-                    jobId: jobId,
-                    phone: cleanPhone
-                };
-                
-                socket.emit('customer_phone_received', responseData);
-                
-            } else {
-                socket.emit('customer_phone_received', {
-                    success: false,
-                    jobId: jobId,
-                    error: 'Nomor customer tidak tersedia'
-                });
-            }
-        } catch (error) {
-            console.error('❌ Error in request_customer_phone:', error);
-            socket.emit('customer_phone_received', {
-                success: false,
-                jobId: jobId,
-                error: 'Terjadi kesalahan sistem'
-            });
-        }
-    });
-}
-
-// === SOCKET.IO CONNECTION HANDLER ===
+// === SOCKET.IO HANDLERS YANG DIPERBAIKI ===
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
     
@@ -324,12 +218,28 @@ io.on('connection', (socket) => {
     });
 
     socket.emit('initial_jobs', sampleJobs);
-    setupTelephoneHandler(socket);
 
+    // === KIRIM PESAN KE CUSTOMER ===
     socket.on('send_message', async (data) => {
-        console.log('💬 Kurir mengirim pesan:', data);
+        console.log('💬 Kurir mengirim pesan:', {
+            jobId: data.jobId,
+            message: data.message
+        });
         
+        // DAPATKAN ATAU BUAT MAPPING UNTUK JOB INI
+        const customerPhone = getOrCreateCustomerPhone(data.jobId);
+        
+        if (!customerPhone) {
+            console.error('❌ Tidak bisa membuat mapping untuk job:', data.jobId);
+            socket.emit('message_sent', { 
+                success: false, 
+                error: 'Tidak dapat menemukan customer untuk job ini' 
+            });
+            return;
+        }
+
         if (whatsappStatus !== 'connected') {
+            console.error('❌ WhatsApp belum terhubung');
             socket.emit('message_sent', { 
                 success: false, 
                 error: 'WhatsApp belum terhubung' 
@@ -338,11 +248,13 @@ io.on('connection', (socket) => {
         }
 
         try {
-            const customerPhone = getOrCreateCustomerPhone(data.jobId);
+            // Kirim pesan ke customer via WhatsApp
             const customerNumber = `${customerPhone}@c.us`;
+            console.log('📤 Mengirim ke:', customerNumber);
             
             await client.sendMessage(customerNumber, data.message);
             
+            // Simpan pesan di history chat
             if (!chatSessions.has(data.jobId)) {
                 chatSessions.set(data.jobId, []);
             }
@@ -357,11 +269,14 @@ io.on('connection', (socket) => {
             
             chatSessions.get(data.jobId).push(messageData);
             
+            // Kirim konfirmasi ke SEMUA client
             io.emit('message_sent', { 
                 success: true,
                 jobId: data.jobId,
                 message: messageData
             });
+            
+            console.log('✅ Pesan berhasil dikirim ke customer');
             
         } catch (error) {
             console.error('❌ Gagal kirim pesan:', error);
@@ -372,7 +287,9 @@ io.on('connection', (socket) => {
         }
     });
 
+    // === MENDAPATKAN HISTORY CHAT ===
     socket.on('get_chat_history', (data) => {
+        console.log('📂 Diminta history chat untuk job:', data.jobId);
         const history = chatSessions.get(data.jobId) || [];
         socket.emit('chat_history', {
             jobId: data.jobId,
@@ -380,73 +297,63 @@ io.on('connection', (socket) => {
         });
     });
 
+    // === HANDLE JOB ACCEPTED (UNTUK SIMULASI) ===
+    socket.on('job_accepted', async (data) => {
+        console.log('✅ Job accepted:', data.jobId);
+        
+        // Buat mapping untuk job yang diterima (jika belum ada)
+        getOrCreateCustomerPhone(data.jobId);
+        
+        socket.emit('job_accepted_success', data);
+    });
+
+    // === DEBUG: LOG SEMUA EVENT ===
+    socket.onAny((eventName, ...args) => {
+        console.log(`🔍 Socket Event: ${eventName}`, args);
+    });
+
     socket.on('disconnect', () => {
         console.log('❌ Client disconnected:', socket.id);
     });
 });
 
-// Routes
+// Routes untuk debugging
 app.get('/', (req, res) => {
     res.json({ 
         status: 'Server Running', 
         whatsapp_status: whatsappStatus,
-        initialization_attempts: initializationAttempts
+        active_chats: chatSessions.size,
+        mappings: {
+            customerMapping: Array.from(customerMapping.entries()),
+            phoneToJobMapping: Array.from(phoneToJobMapping.entries())
+        },
+        test_phones: TEST_PHONES
     });
 });
 
-app.get('/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'OK', 
-        timestamp: new Date().toISOString(),
-        whatsapp: whatsappStatus,
-        uptime: process.uptime(),
-        memory: process.memoryUsage()
+app.get('/debug', (req, res) => {
+    res.json({
+        whatsappStatus,
+        customerMapping: Array.from(customerMapping.entries()),
+        phoneToJobMapping: Array.from(phoneToJobMapping.entries()),
+        chatSessions: Array.from(chatSessions.entries()).map(([jobId, messages]) => ({
+            jobId,
+            messageCount: messages.length
+        }))
     });
 });
 
-// Initialize WhatsApp dengan retry logic
-function initializeWhatsApp() {
-    initializationAttempts++;
-    console.log(`🚀 Initializing WhatsApp client (Attempt ${initializationAttempts}/${MAX_INIT_ATTEMPTS})...`);
-    
-    if (initializationAttempts > MAX_INIT_ATTEMPTS) {
-        console.error('❌ Max initialization attempts reached. Please check your configuration.');
-        whatsappStatus = 'failed';
-        io.emit('whatsapp_status', { status: whatsappStatus });
-        return;
-    }
-    
-    client.initialize().catch(err => {
-        console.error('❌ Gagal inisialisasi WhatsApp:', err.message);
-        whatsappStatus = 'error';
-        
-        const delay = Math.min(initializationAttempts * 5000, 30000);
-        console.log(`🔄 Retrying in ${delay}ms...`);
-        
-        setTimeout(() => {
-            initializeWhatsApp();
-        }, delay);
-    });
-}
-
-// Mulai inisialisasi WhatsApp dengan delay untuk memastikan server ready
-setTimeout(() => {
-    initializeWhatsApp();
-}, 3000);
+// Initialize WhatsApp
+client.initialize().catch(err => {
+    console.error('❌ Gagal inisialisasi WhatsApp:', err);
+    whatsappStatus = 'error';
+});
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server berjalan di port ${PORT}`);
     console.log(`🔗 Frontend: ${FRONTEND_URL}`);
     console.log(`📞 WhatsApp Status: ${whatsappStatus}`);
-    console.log(`🐳 DOCKER OPTIMIZED: Fixed Puppeteer initialization`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('🛑 Shutting down gracefully...');
-    client.destroy();
-    server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-    });
+    console.log(`🗺️ Active Mappings: ${customerMapping.size} jobs`);
+    console.log(`📱 Test Phones: ${TEST_PHONES.join(', ')}`);
+    console.log(`💡 AUTO-MAPPING: AKTIF untuk job simulasi`);
 });
