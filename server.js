@@ -245,62 +245,61 @@ io.on('connection', (socket) => {
 
     socket.emit('initial_jobs', sampleJobs);
 
-    // === HANDLE PESANAN BARU DARI ADMIN ===
-    socket.on('create_order', (orderData) => {
-        console.log('📦 Menerima pesanan baru dari admin:', orderData);
+// === HANDLE PESANAN BARU DARI ADMIN ===
+socket.on('create_order', (orderData) => {
+    console.log('📦 Menerima pesanan baru dari admin:', orderData);
+    
+    try {
+        const jobId = orderData.id || 'ORD' + Date.now();
         
-        try {
-            // Generate unique job ID jika belum ada
-            const jobId = orderData.id || 'ORD' + Date.now();
-            
-            // Buat job object yang lengkap
-            const newJob = {
-                id: jobId,
-                customerPhone: orderData.customer.phone,
-                customerName: orderData.customer.name,
-                status: 'new',
-                pickup: orderData.pickup,
-                delivery: orderData.delivery,
-                payment: orderData.payment,
-                distance: orderData.distance + ' km',
-                estimate: orderData.estimate + ' menit',
-                priority: orderData.priority || 'standard',
-                createdAt: new Date(),
-                customer: orderData.customer
-            };
+        const newJob = {
+            id: jobId,
+            customerPhone: orderData.customer.phone,
+            customerName: orderData.customer.name,
+            status: 'new',
+            pickup: {
+                name: orderData.pickup.name,
+                address: orderData.pickup.address,
+                gps: orderData.pickup.gps || null  // TAMBAH GPS DATA
+            },
+            delivery: {
+                name: orderData.delivery.name,
+                address: orderData.delivery.address,
+                gps: orderData.delivery.gps || null  // TAMBAH GPS DATA
+            },
+            payment: orderData.payment,
+            distance: orderData.distance + ' km',
+            estimate: orderData.estimate + ' menit',
+            priority: orderData.priority || 'standard',
+            createdAt: new Date(),
+            customer: orderData.customer
+        };
 
-            // Simpan ke active orders
-            activeOrders.set(jobId, newJob);
-            
-            // Buat mapping untuk WhatsApp
-            const cleanPhone = newJob.customerPhone.replace(/\D/g, '');
-            customerMapping.set(jobId, cleanPhone);
-            phoneToJobMapping.set(cleanPhone, jobId);
-            
-            console.log(`✅ Pesanan baru berhasil dibuat: ${jobId}`);
-            
-            // Kirim konfirmasi ke admin
-            socket.emit('order_created', { 
-                success: true, 
-                jobId: jobId,
-                order: newJob
-            });
-            
-            // Broadcast ke semua kurir tentang pesanan baru
-            io.emit('new_job_available', newJob);
-            io.emit('order_created_broadcast', newJob);
-            
-            console.log(`📢 Pesanan ${jobId} dikirim ke semua kurir`);
-            
-        } catch (error) {
-            console.error('❌ Error membuat pesanan:', error);
-            socket.emit('order_created', { 
-                success: false, 
-                error: error.message 
-            });
-        }
-    });
-
+        activeOrders.set(jobId, newJob);
+        
+        const cleanPhone = newJob.customerPhone.replace(/\D/g, '');
+        customerMapping.set(jobId, cleanPhone);
+        phoneToJobMapping.set(cleanPhone, jobId);
+        
+        console.log(`✅ Pesanan baru berhasil dibuat: ${jobId}`);
+        
+        socket.emit('order_created', { 
+            success: true, 
+            jobId: jobId,
+            order: newJob
+        });
+        
+        io.emit('new_job_available', newJob);
+        io.emit('order_created_broadcast', newJob);
+        
+    } catch (error) {
+        console.error('❌ Error membuat pesanan:', error);
+        socket.emit('order_created', { 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
     // === KIRIM PESAN KE CUSTOMER ===
     socket.on('send_message', async (data) => {
         console.log('💬 Kurir mengirim pesan:', {
@@ -538,3 +537,4 @@ server.listen(PORT, '0.0.0.0', () => {
     // Start WhatsApp initialization
     initializeWhatsApp();
 });
+
