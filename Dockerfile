@@ -1,21 +1,21 @@
-# Gunakan image Node.js versi LTS
-FROM node:18-alpine
+FROM node:18-slim
 
-# Set working directory
+# Install dependencies untuk Puppeteer
+RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy package.json dan package-lock.json
 COPY package*.json ./
-
-# Install dependencies
 RUN npm install
 
-# Copy source code
 COPY . .
 
-# Expose port (default 3000, tapi Fly.io menggunakan port 8080 secara internal)
-ENV PORT=8080
-EXPOSE 8080
+EXPOSE 3000
 
-# Start the app
-CMD [ "node", "server.js" ]
+CMD ["node", "server.js"]
