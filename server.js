@@ -167,8 +167,16 @@ const sampleJobs = [
         customerPhone: TEST_PHONES[0],
         customerName: 'Budi Santoso',
         status: 'new',
-        pickup: { name: 'Toko Serba Ada', address: 'Jl. Merdeka No. 123' },
-        delivery: { name: 'Budi Santoso', address: 'Jl. Sudirman No. 456' },
+        pickup: { 
+            name: 'Toko Serba Ada', 
+            address: 'Jl. Merdeka No. 123',
+            gps: null
+        },
+        delivery: { 
+            name: 'Budi Santoso', 
+            address: 'Jl. Sudirman No. 456',
+            gps: null
+        },
         payment: 45000,
         distance: '3.2 km',
         estimate: '25 menit'
@@ -178,8 +186,16 @@ const sampleJobs = [
         customerPhone: TEST_PHONES[1],
         customerName: 'Siti Rahayu',
         status: 'new',
-        pickup: { name: 'Restoran Cepat Saji', address: 'Jl. Gatot Subroto No. 78' },
-        delivery: { name: 'Siti Rahayu', address: 'Jl. Thamrin No. 45' },
+        pickup: { 
+            name: 'Restoran Cepat Saji', 
+            address: 'Jl. Gatot Subroto No. 78',
+            gps: null
+        },
+        delivery: { 
+            name: 'Siti Rahayu', 
+            address: 'Jl. Thamrin No. 45',
+            gps: null
+        },
         payment: 38000,
         distance: '2.5 km',
         estimate: '20 menit'
@@ -245,61 +261,61 @@ io.on('connection', (socket) => {
 
     socket.emit('initial_jobs', sampleJobs);
 
-// === HANDLE PESANAN BARU DARI ADMIN ===
-socket.on('create_order', (orderData) => {
-    console.log('📦 Menerima pesanan baru dari admin:', orderData);
-    
-    try {
-        const jobId = orderData.id || 'ORD' + Date.now();
+    // === HANDLE PESANAN BARU DARI ADMIN ===
+    socket.on('create_order', (orderData) => {
+        console.log('📦 Menerima pesanan baru dari admin:', orderData);
         
-        const newJob = {
-            id: jobId,
-            customerPhone: orderData.customer.phone,
-            customerName: orderData.customer.name,
-            status: 'new',
-            pickup: {
-                name: orderData.pickup.name,
-                address: orderData.pickup.address,
-                gps: orderData.pickup.gps || null  // TAMBAH GPS DATA
-            },
-            delivery: {
-                name: orderData.delivery.name,
-                address: orderData.delivery.address,
-                gps: orderData.delivery.gps || null  // TAMBAH GPS DATA
-            },
-            payment: orderData.payment,
-            distance: orderData.distance + ' km',
-            estimate: orderData.estimate + ' menit',
-            priority: orderData.priority || 'standard',
-            createdAt: new Date(),
-            customer: orderData.customer
-        };
+        try {
+            const jobId = orderData.id || 'ORD' + Date.now();
+            
+            const newJob = {
+                id: jobId,
+                customerPhone: orderData.customer.phone,
+                customerName: orderData.customer.name,
+                status: 'new',
+                pickup: {
+                    name: orderData.pickup.name,
+                    address: orderData.pickup.address,
+                    gps: orderData.pickup.gps || null  // TAMBAH GPS DATA
+                },
+                delivery: {
+                    name: orderData.delivery.name,
+                    address: orderData.delivery.address,
+                    gps: orderData.delivery.gps || null  // TAMBAH GPS DATA
+                },
+                payment: orderData.payment,
+                distance: orderData.distance + ' km',
+                estimate: orderData.estimate + ' menit',
+                priority: orderData.priority || 'standard',
+                createdAt: new Date(),
+                customer: orderData.customer
+            };
 
-        activeOrders.set(jobId, newJob);
-        
-        const cleanPhone = newJob.customerPhone.replace(/\D/g, '');
-        customerMapping.set(jobId, cleanPhone);
-        phoneToJobMapping.set(cleanPhone, jobId);
-        
-        console.log(`✅ Pesanan baru berhasil dibuat: ${jobId}`);
-        
-        socket.emit('order_created', { 
-            success: true, 
-            jobId: jobId,
-            order: newJob
-        });
-        
-        io.emit('new_job_available', newJob);
-        io.emit('order_created_broadcast', newJob);
-        
-    } catch (error) {
-        console.error('❌ Error membuat pesanan:', error);
-        socket.emit('order_created', { 
-            success: false, 
-            error: error.message 
-        });
-    }
-});
+            activeOrders.set(jobId, newJob);
+            
+            const cleanPhone = newJob.customerPhone.replace(/\D/g, '');
+            customerMapping.set(jobId, cleanPhone);
+            phoneToJobMapping.set(cleanPhone, jobId);
+            
+            console.log(`✅ Pesanan baru berhasil dibuat: ${jobId}`);
+            
+            socket.emit('order_created', { 
+                success: true, 
+                jobId: jobId,
+                order: newJob
+            });
+            
+            io.emit('new_job_available', newJob);
+            io.emit('order_created_broadcast', newJob);
+            
+        } catch (error) {
+            console.error('❌ Error membuat pesanan:', error);
+            socket.emit('order_created', { 
+                success: false, 
+                error: error.message 
+            });
+        }
+    });
 
     // === KIRIM PESAN KE CUSTOMER ===
     socket.on('send_message', async (data) => {
