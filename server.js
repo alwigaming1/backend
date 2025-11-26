@@ -1,4 +1,4 @@
-// server.js - FIXED CORS AND ORDER MANAGEMENT
+// server.js - FIXED CORS, ORDER MANAGEMENT, AND GPS DATA HANDLING
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -154,6 +154,37 @@ client.on('message', async (msg) => {
     }
 });
 
+// Fungsi untuk mendapatkan koordinat dari link Google Maps (DIPERBAIKI)
+function extractCoordinatesFromUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+
+    // Menghapus segala bentuk placeholder atau awalan yang tidak valid
+    url = url.replace(/^(http|https):\/\/[^/]*maps\.google\.com\//, 'https://www.google.com/maps/');
+
+    // Pola umum untuk koordinat lat,lng (contoh: @-6.229728,106.772584,15z)
+    // Mencari @lat,lng
+    let match = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    
+    if (match) {
+        return { 
+            lat: parseFloat(match[1]), 
+            lng: parseFloat(match[2]) 
+        };
+    }
+    
+    // Pola lain yang hanya berisi koordinat (misal: 6.229728,106.772584)
+    match = url.match(/(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (match) {
+        return { 
+            lat: parseFloat(match[1]), 
+            lng: parseFloat(match[2]) 
+        };
+    }
+
+    return null;
+}
+
+
 // === SAMPLE DATA DENGAN NOMOR TESTING ===
 const TEST_PHONES = [
     '6282195036971',  // Ganti dengan nomor WA Anda
@@ -161,14 +192,27 @@ const TEST_PHONES = [
     '6282195036971'   // Ganti dengan nomor WA lain (atau sama)
 ];
 
+// Contoh Link Google Maps yang valid (gunakan ini sebagai referensi)
+const SAMPLE_GPS_PICKUP_URL = 'https://maps.app.goo.gl/3w5rT1g8s7f9zX6x8'; // Contoh URL pendek
+const SAMPLE_GPS_DELIVERY_URL = 'https://www.google.com/maps/@-6.229728,106.772584,15z'; // Contoh URL dengan koordinat
+
 const sampleJobs = [
     {
         id: 'ORD1001',
         customerPhone: TEST_PHONES[0],
         customerName: 'Budi Santoso',
         status: 'new',
-        pickup: { name: 'Toko Serba Ada', address: 'Jl. Merdeka No. 123' },
-        delivery: { name: 'Budi Santoso', address: 'Jl. Sudirman No. 456' },
+        pickup: { 
+            name: 'Toko Serba Ada', 
+            address: 'Jl. Merdeka No. 123',
+            // Gunakan koordinat yang sudah di-extract
+            gps: extractCoordinatesFromUrl(SAMPLE_GPS_PICKUP_URL) || { lat: -6.2297, lng: 106.7725 }
+        },
+        delivery: { 
+            name: 'Budi Santoso', 
+            address: 'Jl. Sudirman No. 456',
+            gps: extractCoordinatesFromUrl(SAMPLE_GPS_DELIVERY_URL) || { lat: -6.2115, lng: 106.8122 }
+        },
         payment: 45000,
         distance: '3.2 km',
         estimate: '25 menit'
@@ -243,7 +287,7 @@ io.on('connection', (socket) => {
         qr: qrCodeData 
     });
 
-    socket.emit('initial_jobs', sampleJobs);
+    socket.emit('initial_jobs', Array.from(activeOrders.values()));
 
 // === HANDLE PESANAN BARU DARI ADMIN ===
 socket.on('create_order', (orderData) => {
@@ -252,6 +296,10 @@ socket.on('create_order', (orderData) => {
     try {
         const jobId = orderData.id || 'ORD' + Date.now();
         
+        // EKSTRAK KOORDINAT DARI LINK
+        const pickupGps = orderData.pickup.gps ? extractCoordinatesFromUrl(orderData.pickup.gps) : null;
+        const deliveryGps = orderData.delivery.gps ? extractCoordinatesFromUrl(orderData.delivery.gps) : null;
+
         const newJob = {
             id: jobId,
             customerPhone: orderData.customer.phone,
@@ -260,18 +308,18 @@ socket.on('create_order', (orderData) => {
             pickup: {
                 name: orderData.pickup.name,
                 address: orderData.pickup.address,
-                gps: orderData.pickup.gps || null  // TAMBAH GPS DATA
+                gps: pickupGps 
             },
             delivery: {
                 name: orderData.delivery.name,
                 address: orderData.delivery.address,
-                gps: orderData.delivery.gps || null  // TAMBAH GPS DATA
+                gps: deliveryGps 
             },
             payment: orderData.payment,
             distance: orderData.distance + ' km',
             estimate: orderData.estimate + ' menit',
             priority: orderData.priority || 'standard',
-            createdAt: new Date(),
+            createdAt: orderData.createdAt || new Date(),
             customer: orderData.customer
         };
 
@@ -283,12 +331,14 @@ socket.on('create_order', (orderData) => {
         
         console.log(`✅ Pesanan baru berhasil dibuat: ${jobId}`);
         
+        // Beri konfirmasi sukses ke admin
         socket.emit('order_created', { 
             success: true, 
             jobId: jobId,
             order: newJob
         });
         
+        // Broadcast job baru ke kurir
         io.emit('new_job_available', newJob);
         io.emit('order_created_broadcast', newJob);
         
